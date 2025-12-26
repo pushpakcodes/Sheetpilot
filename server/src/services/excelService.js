@@ -4,25 +4,49 @@ import path from 'path';
 export const getPreviewData = async (filePath) => {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(filePath);
-    const worksheet = workbook.worksheets[0];
     
-    const data = [];
-    worksheet.eachRow({ includeEmpty: true }, (row, rowNumber) => {
-        // row.values is 1-based, index 0 is undefined/null usually
-        // We want to return a clean array of arrays or objects
-        const rowValues = JSON.parse(JSON.stringify(row.values));
-        // Remove the first element if it's null/undefined (ExcelJS quirk)
-        if (Array.isArray(rowValues) && (rowValues[0] === null || rowValues[0] === undefined)) {
-            rowValues.shift();
+    const sheets = [];
+
+    workbook.eachSheet((worksheet, sheetId) => {
+        const sheetData = [];
+        // Ensure we capture all rows, even if they are empty, up to the last used row
+        const rowCount = worksheet.rowCount;
+        
+        // Iterate up to rowCount manually to ensure we don't miss anything
+        // eachRow with includeEmpty might still be sparse
+        for (let i = 1; i <= rowCount; i++) {
+             const row = worksheet.getRow(i);
+             const rowValues = JSON.parse(JSON.stringify(row.values));
+             
+             // Remove the first element if it's null/undefined (ExcelJS quirk: index 0 is reserved)
+             if (Array.isArray(rowValues) && (rowValues[0] === null || rowValues[0] === undefined)) {
+                 rowValues.shift();
+             } else if (!Array.isArray(rowValues)) {
+                 // If rowValues is not an array (e.g. object), handle it or default to empty
+                 // For empty rows, row.values might be undefined or just { ... }
+                 // If it's an object (Rich Text?), we might need more complex parsing, but for now assume standard values
+             }
+             
+             // Ensure sparse arrays are filled with nulls
+             // Note: rowValues might be shorter than the max column count.
+             // We should ideally pad it to the max column count of the sheet, but the frontend handles varying lengths.
+             if (Array.isArray(rowValues)) {
+                 for(let j=0; j<rowValues.length; j++) {
+                     if(rowValues[j] === undefined) rowValues[j] = null;
+                 }
+                 sheetData.push(rowValues);
+             } else {
+                 sheetData.push([]); // Empty row
+             }
         }
-        // ExcelJS might return sparse arrays, fill with null/empty string
-        for(let i=0; i<rowValues.length; i++) {
-             if(rowValues[i] === undefined) rowValues[i] = null;
-        }
-        data.push(rowValues);
+        
+        sheets.push({
+            name: worksheet.name,
+            data: sheetData
+        });
     });
     
-    return data;
+    return { sheets };
 };
 
 export const processExcelAction = async (filePath, actionData) => {
