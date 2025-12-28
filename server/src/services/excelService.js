@@ -199,3 +199,105 @@ const sortData = async (worksheet, { column, order }) => {
         targetRow.values = r.values;
     });
 };
+
+/**
+ * Get windowed/sliced data from an Excel sheet
+ * This function loads the full workbook but returns only the requested window
+ * to enable virtualized rendering on the frontend.
+ * 
+ * @param {string} filePath - Path to the Excel file
+ * @param {number} sheetIndex - Index of the sheet (0-based)
+ * @param {number} rowStart - Starting row index (1-based, Excel convention)
+ * @param {number} rowEnd - Ending row index (1-based, inclusive)
+ * @param {number} colStart - Starting column index (1-based, Excel convention)
+ * @param {number} colEnd - Ending column index (1-based, inclusive)
+ * @returns {Promise<Object>} Windowed data with metadata
+ */
+export const getWindowedSheetData = async (filePath, sheetIndex, rowStart, rowEnd, colStart, colEnd) => {
+    // Load the full workbook (required by ExcelJS)
+    // This is done once per request - in production, you might want to cache workbooks
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    
+    // Validate sheet index
+    if (sheetIndex < 0 || sheetIndex >= workbook.worksheets.length) {
+        throw new Error(`Sheet index ${sheetIndex} is out of range. Total sheets: ${workbook.worksheets.length}`);
+    }
+    
+    const worksheet = workbook.worksheets[sheetIndex];
+    const sheetName = worksheet.name;
+    
+    // Get total dimensions of the sheet
+    // ExcelJS rowCount and columnCount give us the actual used dimensions
+    const totalRows = worksheet.rowCount || 0;
+    const totalColumns = worksheet.columnCount || 0;
+    
+    // Clamp the requested window to actual sheet bounds
+    // ExcelJS uses 1-based indexing for rows and columns
+    const clampedRowStart = Math.max(1, Math.min(rowStart, totalRows + 1));
+    const clampedRowEnd = Math.max(1, Math.min(rowEnd, totalRows));
+    const clampedColStart = Math.max(1, Math.min(colStart, totalColumns + 1));
+    const clampedColEnd = Math.max(1, Math.min(colEnd, totalColumns));
+    
+    // Extract only the requested window of data
+    // This prevents sending the entire sheet to the frontend
+    const windowData = [];
+    
+    // Iterate only through the requested rows (1-based in ExcelJS)
+    for (let rowNum = clampedRowStart; rowNum <= clampedRowEnd; rowNum++) {
+        const row = worksheet.getRow(rowNum);
+        const rowValues = [];
+        
+        // Extract only the requested columns (1-based in ExcelJS)
+        for (let colNum = clampedColStart; colNum <= clampedColEnd; colNum++) {
+            const cell = row.getCell(colNum);
+            let cellValue = cell.value;
+            
+            // Handle different cell value types
+            // ExcelJS can return various types: string, number, Date, formula result, etc.
+            if (cellValue === null || cellValue === undefined) {
+                cellValue = null;
+            } else if (cellValue instanceof Date) {
+                // Convert dates to ISO string for JSON serialization
+                cellValue = cellValue.toISOString();
+            } else if (typeof cellValue === 'object' && cellValue !== null) {
+                // For complex objects (formulas, rich text), extract the text representation
+                // In production, you might want to handle formulas differently
+                if (cellValue.text) {
+                    cellValue = cellValue.text;
+                } else if (cellValue.result) {
+                    // Formula result
+                    cellValue = cellValue.result;
+                } else {
+                    // Fallback: stringify complex objects
+                    cellValue = JSON.stringify(cellValue);
+                }
+            }
+            
+            rowValues.push(cellValue);
+        }
+        
+        windowData.push(rowValues);
+    }
+    
+    // Return windowed data with metadata
+    // The frontend uses this to:
+    // 1. Render only the visible cells
+    // 2. Know the total dimensions for virtual scrolling
+    // 3. Calculate which window to fetch next on scroll
+    return {
+        data: windowData,
+        meta: {
+            totalRows,
+            totalColumns,
+            sheetName,
+            // Return the actual window bounds that were returned (useful for debugging)
+            window: {
+                rowStart: clampedRowStart,
+                rowEnd: clampedRowEnd,
+                colStart: clampedColStart,
+                colEnd: clampedColEnd
+            }
+        }
+    };
+};

@@ -3,6 +3,7 @@ import { uploadFile, processCommand, getFiles } from '../services/api';
 import Navbar from '../components/Navbar';
 import FileUploader from '../components/FileUploader';
 import ExcelPreview from '../components/ExcelPreview';
+import VirtualizedExcelView from '../components/VirtualizedExcelView';
 import Ribbon from '../components/Ribbon';
 import ChatSidebar from '../components/ChatSidebar';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -114,7 +115,15 @@ const Dashboard = () => {
                 </div>
               </motion.div>
             ) : (
-               <ExcelPreview data={previewData} />
+               // Use virtualized view for large files, fallback to preview for small files
+               currentFile?.filePath ? (
+                 <VirtualizedExcelView 
+                   filePath={currentFile.filePath} 
+                   sheetIndex={0}
+                 />
+               ) : (
+                 <ExcelPreview data={previewData} />
+               )
             )}
           </AnimatePresence>
         </main>
