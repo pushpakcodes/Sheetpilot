@@ -53,10 +53,10 @@ export const getWorkbookMetadata = (workbookId) => {
  * @param {number} rowEnd - Ending row (1-based, inclusive)
  * @param {number} colStart - Starting column (1-based)
  * @param {number} colEnd - Ending column (1-based, inclusive)
- * @param {number} sheetIndex - Sheet index (0-based, defaults to 0)
+ * @param {string} sheetId - Sheet name (NOT index)
  * @returns {Promise<Object>} Windowed data with metadata
  */
-export const getSheetWindow = (workbookId, rowStart, rowEnd, colStart, colEnd, sheetIndex = 0) => {
+export const getSheetWindow = (workbookId, rowStart, rowEnd, colStart, colEnd, sheetId) => {
     const encodedId = encodeURIComponent(workbookId);
     return api.get(`/excel/workbook/${encodedId}/window`, {
         params: {
@@ -64,7 +64,7 @@ export const getSheetWindow = (workbookId, rowStart, rowEnd, colStart, colEnd, s
             rowEnd,
             colStart,
             colEnd,
-            sheetIndex
+            sheetId // Use sheet name, not index
         }
     });
 };
@@ -72,16 +72,16 @@ export const getSheetWindow = (workbookId, rowStart, rowEnd, colStart, colEnd, s
 /**
  * Update a single cell in the workbook
  * @param {string} workbookId - File identifier (filename or path)
- * @param {number} sheetIndex - Sheet index (0-based)
+ * @param {string} sheetId - Sheet name (NOT index)
  * @param {number} row - Row number (1-based)
  * @param {number} col - Column number (1-based)
  * @param {any} value - New cell value
  * @returns {Promise<Object>} Success response
  */
-export const updateCell = (workbookId, sheetIndex, row, col, value) => {
+export const updateCell = (workbookId, sheetId, row, col, value) => {
     const encodedId = encodeURIComponent(workbookId);
     return api.post(`/excel/workbook/${encodedId}/cell`, {
-        sheetIndex,
+        sheetId, // Use sheet name, not index
         row,
         col,
         value

@@ -115,23 +115,22 @@ export const updateCellController = async (req, res) => {
     try {
         let { workbookId } = req.params;
         workbookId = decodeURIComponent(workbookId);
-        const { sheetIndex, row, col, value } = req.body;
+        const { sheetId, row, col, value } = req.body;
         
         // Validate required parameters
-        if (sheetIndex === undefined || !row || !col || value === undefined) {
+        if (!sheetId || !row || !col || value === undefined) {
             return res.status(400).json({ 
-                message: 'Missing required parameters: sheetIndex, row, col, value' 
+                message: 'Missing required parameters: sheetId (sheet name), row, col, value' 
             });
         }
         
         // Validate numeric parameters
-        const parsedSheetIndex = parseInt(sheetIndex, 10);
         const parsedRow = parseInt(row, 10);
         const parsedCol = parseInt(col, 10);
         
-        if (isNaN(parsedSheetIndex) || isNaN(parsedRow) || isNaN(parsedCol)) {
+        if (isNaN(parsedRow) || isNaN(parsedCol)) {
             return res.status(400).json({ 
-                message: 'Invalid parameters: sheetIndex, row, and col must be numbers' 
+                message: 'Invalid parameters: row and col must be numbers' 
             });
         }
         
@@ -150,8 +149,8 @@ export const updateCellController = async (req, res) => {
             });
         }
         
-        // Update the cell
-        await updateCell(filePath, parsedSheetIndex, parsedRow, parsedCol, value);
+        // Update the cell using sheet name (NOT index)
+        await updateCell(filePath, sheetId, parsedRow, parsedCol, value);
         
         res.json({ 
             success: true, 
@@ -251,7 +250,15 @@ export const getSheetWindow = async (req, res) => {
         // Handle both workbookId (new) and sheetId (legacy) parameter names
         let workbookId = req.params.workbookId || req.params.sheetId;
         workbookId = decodeURIComponent(workbookId);
-        const { rowStart, rowEnd, colStart, colEnd, sheetIndex = 0 } = req.query;
+        
+        // CRITICAL: Use sheetId (name) instead of sheetIndex
+        const { rowStart, rowEnd, colStart, colEnd, sheetId } = req.query;
+        
+        if (!sheetId) {
+            return res.status(400).json({ 
+                message: 'Missing required query parameter: sheetId (sheet name)' 
+            });
+        }
         
         // Validate required query parameters
         if (!rowStart || !rowEnd || !colStart || !colEnd) {
@@ -265,13 +272,11 @@ export const getSheetWindow = async (req, res) => {
         const parsedRowEnd = parseInt(rowEnd, 10);
         const parsedColStart = parseInt(colStart, 10);
         const parsedColEnd = parseInt(colEnd, 10);
-        const parsedSheetIndex = parseInt(sheetIndex, 10);
         
         if (isNaN(parsedRowStart) || isNaN(parsedRowEnd) || 
-            isNaN(parsedColStart) || isNaN(parsedColEnd) || 
-            isNaN(parsedSheetIndex)) {
+            isNaN(parsedColStart) || isNaN(parsedColEnd)) {
             return res.status(400).json({ 
-                message: 'Invalid query parameters: all values must be numbers' 
+                message: 'Invalid query parameters: rowStart, rowEnd, colStart, colEnd must be numbers' 
             });
         }
         
@@ -303,11 +308,10 @@ export const getSheetWindow = async (req, res) => {
             });
         }
         
-        // Fetch windowed data
-        // This loads the full Excel file but returns only the requested slice
+        // Fetch windowed data using sheet name (NOT index)
         const result = await getWindowedSheetData(
             filePath,
-            parsedSheetIndex,
+            sheetId, // Use sheet name
             parsedRowStart,
             parsedRowEnd,
             parsedColStart,

@@ -21,7 +21,7 @@ router.get('/files', protect, getUserFiles);
 router.get('/workbook/:workbookId/metadata', extractUser, getWorkbookMetadataController);
 
 // Windowed data endpoint for virtualized rendering
-// GET /api/excel/workbook/:workbookId/window?rowStart=1&rowEnd=100&colStart=1&colEnd=30&sheetIndex=0
+// GET /api/excel/workbook/:workbookId/window?rowStart=1&rowEnd=100&colStart=1&colEnd=30&sheetId=Sheet1
 router.get('/workbook/:workbookId/window', extractUser, getSheetWindow);
 
 // Legacy endpoint for backward compatibility

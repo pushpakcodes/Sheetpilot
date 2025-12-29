@@ -17,7 +17,7 @@ import { getSheetWindow } from '../services/api';
  * - Calculates which window to fetch based on scroll position
  * - Never loads the entire sheet into memory
  */
-const VirtualizedExcelView = ({ filePath, sheetIndex = 0, onSheetChange }) => {
+const VirtualizedExcelView = ({ filePath, sheetId, onSheetChange }) => {
   // Metadata about the sheet (total dimensions)
   const [metadata, setMetadata] = useState(null);
   
@@ -58,7 +58,7 @@ const VirtualizedExcelView = ({ filePath, sheetIndex = 0, onSheetChange }) => {
    * Extract filename from filePath
    * The backend accepts either filename or full path
    */
-  const sheetId = useMemo(() => {
+  const workbookId = useMemo(() => {
     if (!filePath) return null;
     // If it's already just a filename, use it
     if (!filePath.includes('/') && !filePath.includes('\\')) {
@@ -97,7 +97,7 @@ const VirtualizedExcelView = ({ filePath, sheetIndex = 0, onSheetChange }) => {
     const fetchMetadata = async () => {
       try {
         // Fetch a small window to get metadata
-        const response = await getSheetWindow(sheetId, 1, 1, 1, 1, sheetIndex);
+        const response = await getSheetWindow(workbookId, 1, 1, 1, 1, sheetId);
         const meta = response.data.meta;
         setMetadata(meta);
         setGridDimensions({
@@ -110,7 +110,7 @@ const VirtualizedExcelView = ({ filePath, sheetIndex = 0, onSheetChange }) => {
     };
 
     fetchMetadata();
-  }, [sheetId, sheetIndex]);
+  }, [workbookId, sheetId]);
 
   /**
    * Prefetch initial visible window when metadata is available
@@ -168,7 +168,7 @@ const VirtualizedExcelView = ({ filePath, sheetIndex = 0, onSheetChange }) => {
     setLoadingWindows(prev => new Set(prev).add(cacheKey));
     
     try {
-      const response = await getSheetWindow(sheetId, rowStart, rowEnd, colStart, colEnd, sheetIndex);
+      const response = await getSheetWindow(workbookId, rowStart, rowEnd, colStart, colEnd, sheetId);
       
       // Store in cache
       setDataCache(prev => {
@@ -196,7 +196,7 @@ const VirtualizedExcelView = ({ filePath, sheetIndex = 0, onSheetChange }) => {
         return newSet;
       });
     }
-  }, [sheetId, sheetIndex, dataCache, loadingWindows]);
+  }, [workbookId, sheetId, dataCache, loadingWindows]);
 
   /**
    * Get cell value from cache
@@ -446,7 +446,7 @@ const VirtualizedExcelView = ({ filePath, sheetIndex = 0, onSheetChange }) => {
     };
   }, [scrollState, metadata, getColumnLabel, containerSize]);
 
-  if (!sheetId) {
+  if (!workbookId) {
     return (
       <div className="flex items-center justify-center h-full text-slate-500">
         No file selected

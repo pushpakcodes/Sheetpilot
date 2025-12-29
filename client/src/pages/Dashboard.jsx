@@ -19,7 +19,7 @@ const Dashboard = () => {
   const [chatHistory, setChatHistory] = useState([]);
   const [fileHistory, setFileHistory] = useState([]); // Undo stack
   const [workbookMetadata, setWorkbookMetadata] = useState(null);
-  const [activeSheetId, setActiveSheetId] = useState(0);
+  const [activeSheetId, setActiveSheetId] = useState(null); // Store sheet name, not index
 
   const handleUpload = async (file) => {
     setLoading(true);
@@ -33,13 +33,17 @@ const Dashboard = () => {
       setCurrentFile(data);
       setPreviewData(data.preview);
       setFileHistory([]); // Reset undo stack on new upload
-      setActiveSheetId(0); // Reset to first sheet
       
       // Fetch workbook metadata for sheet tabs
       try {
         const metadataResponse = await getWorkbookMetadata(data.filePath);
         setWorkbookMetadata(metadataResponse.data);
         console.log('📊 Workbook metadata loaded:', metadataResponse.data);
+        
+        // Set active sheet to first visible sheet (by name, not index)
+        if (metadataResponse.data.sheets && metadataResponse.data.sheets.length > 0) {
+          setActiveSheetId(metadataResponse.data.sheets[0].sheetId); // Use sheet name
+        }
       } catch (metadataError) {
         console.error('Failed to load workbook metadata:', metadataError);
         // Continue without metadata - sheet tabs won't show
@@ -57,7 +61,7 @@ const Dashboard = () => {
   const handleSheetChange = (sheetId) => {
     console.log('📑 Switching to sheet:', sheetId);
     setActiveSheetId(sheetId);
-    // Spreadsheet component will handle the sheet change via sheetIndex prop
+    // Spreadsheet component will handle the sheet change via sheetId prop
   };
 
   const handleCommand = async (command) => {
@@ -141,14 +145,16 @@ const Dashboard = () => {
                currentFile?.filePath ? (
                  <>
                    <div className="flex-1 overflow-hidden">
-                     <Spreadsheet 
-                       filePath={currentFile.filePath} 
-                       sheetIndex={activeSheetId}
-                       onDataChange={(changes) => {
-                         // Handle cell changes - can sync to backend here
-                         console.log('Cell changes:', changes);
-                       }}
-                     />
+                     {activeSheetId && (
+                       <Spreadsheet 
+                         filePath={currentFile.filePath} 
+                         sheetId={activeSheetId}
+                         onDataChange={(changes) => {
+                           // Handle cell changes - can sync to backend here
+                           console.log('Cell changes:', changes);
+                         }}
+                       />
+                     )}
                    </div>
                    {workbookMetadata && workbookMetadata.sheets && (
                      <SheetTabs

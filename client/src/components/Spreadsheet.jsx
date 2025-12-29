@@ -18,7 +18,7 @@ registerAllModules();
  * - Edit synchronization with backend
  * - Constant memory usage
  */
-const Spreadsheet = ({ filePath, sheetIndex = 0, onDataChange }) => {
+const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
   const hotRef = useRef(null);
   const workbookIdRef = useRef(null);
   
@@ -72,9 +72,13 @@ const Spreadsheet = ({ filePath, sheetIndex = 0, onDataChange }) => {
       setLoading(true);
       setError(null);
       
-      console.log('🔄 Fetching window:', { rowStart, rowEnd, colStart, colEnd, sheetIndex });
+      console.log('🔄 Fetching window:', { rowStart, rowEnd, colStart, colEnd, sheetId });
       
-      const response = await getSheetWindow(workbookId, rowStart, rowEnd, colStart, colEnd, sheetIndex);
+      if (!sheetId) {
+        throw new Error('Sheet ID (name) is required');
+      }
+      
+      const response = await getSheetWindow(workbookId, rowStart, rowEnd, colStart, colEnd, sheetId);
       const { data: responseData, meta } = response.data;
 
       // Store metadata
@@ -126,7 +130,7 @@ const Spreadsheet = ({ filePath, sheetIndex = 0, onDataChange }) => {
     } finally {
       loadingRef.current = false;
     }
-  }, [workbookId, sheetIndex]);
+  }, [workbookId, sheetId]);
 
   // Track previous viewport to detect scroll direction
   const previousViewportRef = useRef({ row: 0, col: 0 });
@@ -224,7 +228,10 @@ const Spreadsheet = ({ filePath, sheetIndex = 0, onDataChange }) => {
       // Sync each edit to backend
       for (const edit of edits) {
         try {
-          await updateCell(workbookId, sheetIndex, edit.row, edit.col, edit.value);
+          if (!sheetId) {
+            throw new Error('Sheet ID (name) is required for cell updates');
+          }
+          await updateCell(workbookId, sheetId, edit.row, edit.col, edit.value);
           console.log('✅ Cell synced:', edit);
         } catch (error) {
           console.error('❌ Failed to sync cell:', edit, error);
@@ -238,7 +245,7 @@ const Spreadsheet = ({ filePath, sheetIndex = 0, onDataChange }) => {
         onDataChange(edits);
       }
     }, EDIT_DEBOUNCE_MS);
-  }, [workbookId, sheetIndex, onDataChange]);
+  }, [workbookId, sheetId, onDataChange]);
 
   /**
    * Initial load - fetch first window
@@ -262,11 +269,13 @@ const Spreadsheet = ({ filePath, sheetIndex = 0, onDataChange }) => {
 
     // Load initial window
     const loadInitial = async () => {
-      await fetchDataWindow(1, 100, 1, 30, true);
+      if (sheetId) {
+        await fetchDataWindow(1, 100, 1, 30, true);
+      }
     };
 
     loadInitial();
-  }, [workbookId, sheetIndex, fetchDataWindow]);
+  }, [workbookId, sheetId, fetchDataWindow]);
 
   /**
    * Update Handsontable when data changes
@@ -347,7 +356,7 @@ const Spreadsheet = ({ filePath, sheetIndex = 0, onDataChange }) => {
         </div>
       )}
       <HotTable
-        key={`${workbookId}-${sheetIndex}`} // Force re-render when workbook or sheet changes
+        key={`${workbookId}-${sheetId}`} // Force re-render when workbook or sheet changes
         ref={hotRef}
         data={displayData}
         colHeaders={true}
