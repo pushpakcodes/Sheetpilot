@@ -236,14 +236,18 @@ export const getWorkbookMetadata = async (filePath) => {
         .map(worksheet => {
             // Use dimensions for accurate counts (handles sparse data correctly)
             const dimensions = worksheet.dimensions;
-            const totalRows = dimensions ? dimensions.bottom : (worksheet.rowCount || 0);
-            const totalCols = dimensions ? dimensions.right : (worksheet.columnCount || 0);
+            const actualRows = dimensions ? dimensions.bottom : (worksheet.rowCount || 0);
+            const actualCols = dimensions ? dimensions.right : (worksheet.columnCount || 0);
+            
+            // Allow infinite scrolling by returning larger dimensions
+            const MAX_VIRTUAL_ROWS = Math.max(actualRows + 100, 10000);
+            const MAX_VIRTUAL_COLS = Math.max(actualCols + 20, 200);
             
             return {
                 sheetId: worksheet.name,  // Use name as ID, NOT index
                 name: worksheet.name,
-                totalRows: Math.max(totalRows, 0),
-                totalCols: Math.max(totalCols, 0)
+                totalRows: MAX_VIRTUAL_ROWS,
+                totalCols: MAX_VIRTUAL_COLS
             };
         });
     
@@ -315,15 +319,19 @@ export const getWindowedSheetData = async (filePath, sheetId, rowStart, rowEnd, 
     
     // CRITICAL: Use dimensions for accurate counts (handles sparse data correctly)
     const dimensions = worksheet.dimensions;
-    const totalRows = dimensions ? dimensions.bottom : (worksheet.rowCount || 0);
-    const totalColumns = dimensions ? dimensions.right : (worksheet.columnCount || 0);
+    const actualRows = dimensions ? dimensions.bottom : (worksheet.rowCount || 0);
+    const actualCols = dimensions ? dimensions.right : (worksheet.columnCount || 0);
     
-    // Clamp the requested window to actual sheet bounds
+    // Allow infinite scrolling by returning larger dimensions
+    const MAX_VIRTUAL_ROWS = Math.max(actualRows + 100, 10000);
+    const MAX_VIRTUAL_COLS = Math.max(actualCols + 20, 200);
+    
+    // Clamp the requested window to VIRTUAL bounds, not actual bounds
     // ExcelJS uses 1-based indexing for rows and columns
-    const clampedRowStart = Math.max(1, Math.min(rowStart, totalRows + 1));
-    const clampedRowEnd = Math.max(1, Math.min(rowEnd, totalRows));
-    const clampedColStart = Math.max(1, Math.min(colStart, totalColumns + 1));
-    const clampedColEnd = Math.max(1, Math.min(colEnd, totalColumns));
+    const clampedRowStart = Math.max(1, rowStart);
+    const clampedRowEnd = Math.max(1, rowEnd); 
+    const clampedColStart = Math.max(1, colStart);
+    const clampedColEnd = Math.max(1, colEnd);
     
     // CRITICAL: Extract window data using index-based access
     // This preserves empty cells and maintains column alignment
@@ -369,8 +377,8 @@ export const getWindowedSheetData = async (filePath, sheetId, rowStart, rowEnd, 
     return {
         data: windowData,
         meta: {
-            totalRows,
-            totalColumns,
+            totalRows: MAX_VIRTUAL_ROWS,
+            totalColumns: MAX_VIRTUAL_COLS,
             sheetName,
             // Return the actual window bounds that were returned (useful for debugging)
             window: {

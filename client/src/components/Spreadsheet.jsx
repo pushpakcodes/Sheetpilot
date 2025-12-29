@@ -363,9 +363,8 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
         rowHeaders={true}
         width="100%"
         height={containerHeight}
-        stretchH="all"
         rowHeights={28}
-        colWidths={120}
+        colWidths={100}
         autoRowSize={false}
         autoColumnSize={false}
         manualRowResize={true}
@@ -376,7 +375,8 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
         licenseKey="non-commercial-and-evaluation"
         themeName="ht-theme-main"
         afterChange={handleAfterChange}
-        afterScroll={handleScroll}
+        afterScrollHorizontally={handleScroll}
+        afterScrollVertically={handleScroll}
         afterInit={() => {
           console.log('✅ Handsontable initialized');
           if (hotRef.current?.hotInstance) {
