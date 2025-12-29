@@ -2,250 +2,315 @@ import React, { useRef, useEffect, useCallback, useMemo, useState } from 'react'
 import { HotTable } from '@handsontable/react-wrapper';
 import Handsontable from 'handsontable/base';
 import { registerAllModules } from 'handsontable/registry';
-import { getSheetWindow } from '../services/api';
+import { getSheetWindow, updateCell } from '../services/api';
 
 // Register all Handsontable modules
 registerAllModules();
 
 /**
- * Spreadsheet - Handsontable-based Excel viewer/editor
+ * Spreadsheet - Handsontable-based Excel viewer/editor with virtualized lazy loading
  * 
  * Features:
- * - Excel-like smooth scrolling
- * - Virtualized rendering for large datasets
- * - Editable cells with backend sync
- * - Proper grid alignment
- * - Fixed-size container for stable rendering
+ * - Excel-style smooth scrolling
+ * - Virtualized rendering with window replacement (NOT appending)
+ * - Multi-sheet support
+ * - Lazy loading on scroll (vertical and horizontal)
+ * - Edit synchronization with backend
+ * - Constant memory usage
  */
 const Spreadsheet = ({ filePath, sheetIndex = 0, onDataChange }) => {
   const hotRef = useRef(null);
-  const [data, setData] = useState([[]]); // Initialize with at least one empty row
+  const workbookIdRef = useRef(null);
+  
+  // Data state - stores ONLY the current window
+  const [data, setData] = useState([[]]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // Metadata and window tracking
   const metadataRef = useRef(null);
+  const currentWindowRef = useRef({ rowStart: 0, rowEnd: 0, colStart: 0, colEnd: 0 });
   const loadingRef = useRef(false);
-  const pendingChangesRef = useRef([]);
-  const debounceTimerRef = useRef(null);
-  const isMountedRef = useRef(false);
+  const scrollDebounceTimerRef = useRef(null);
+  const pendingEditTimerRef = useRef(null);
+  const pendingEditsRef = useRef([]);
+  
+  // Constants
+  const SCROLL_BUFFER = 30; // Rows/cols to load beyond visible area
+  const SCROLL_DEBOUNCE_MS = 150; // Debounce scroll requests
+  const EDIT_DEBOUNCE_MS = 1000; // Debounce edit sync
 
   /**
-   * Extract filename from filePath and URL encode it
+   * Extract workbookId from filePath
+   * Note: Don't encode here - api.js will handle encoding
    */
-  const sheetId = useMemo(() => {
+  const workbookId = useMemo(() => {
     if (!filePath) return null;
-    // URL encode the filePath to handle special characters
-    // The backend can handle both encoded paths and filenames
-    return encodeURIComponent(filePath);
+    return filePath; // Pass raw filePath, api.js will encode it
   }, [filePath]);
 
   /**
-   * Fetch data window from backend
+   * Fetch and REPLACE data window (NOT append)
+   * This is the core of virtualized loading - we replace the entire data array
+   * with only the visible window + buffer
    */
-  const fetchDataWindow = useCallback(async (rowStart, rowEnd, colStart, colEnd) => {
-    if (!sheetId || loadingRef.current) return;
+  const fetchDataWindow = useCallback(async (rowStart, rowEnd, colStart, colEnd, force = false) => {
+    if (!workbookId || loadingRef.current) return;
+    
+    // Check if we're requesting the same window (prevent duplicate requests)
+    const currentWindow = currentWindowRef.current;
+    if (!force && 
+        currentWindow.rowStart === rowStart && 
+        currentWindow.rowEnd === rowEnd &&
+        currentWindow.colStart === colStart &&
+        currentWindow.colEnd === colEnd) {
+      return;
+    }
 
     try {
       loadingRef.current = true;
       setLoading(true);
       setError(null);
-      console.log('Fetching data window:', { sheetId, rowStart, rowEnd, colStart, colEnd, sheetIndex });
-      const response = await getSheetWindow(sheetId, rowStart, rowEnd, colStart, colEnd, sheetIndex);
-      console.log('API Response:', response.data);
       
+      console.log('🔄 Fetching window:', { rowStart, rowEnd, colStart, colEnd, sheetIndex });
+      
+      const response = await getSheetWindow(workbookId, rowStart, rowEnd, colStart, colEnd, sheetIndex);
       const { data: responseData, meta } = response.data;
 
       // Store metadata
       if (meta) {
         metadataRef.current = meta;
-        console.log('Metadata stored:', meta);
       }
 
-      // Convert 2D array to Handsontable format
-      // Backend returns data[row][col], we need to ensure it's properly formatted
+      // CRITICAL: Replace entire data array with window data
+      // This ensures we never accumulate data - memory stays constant
       if (responseData && Array.isArray(responseData)) {
-        setData(prevData => {
-          // Initialize data array if needed
-          let newData = prevData;
-          if ((!newData.length || newData.length === 1 && !newData[0].length) && meta) {
-            const totalRows = Math.max(meta.totalRows || 100, 1);
-            const totalCols = Math.max(meta.totalColumns || 26, 1);
-            newData = Array(totalRows).fill(null).map(() => Array(totalCols).fill(null));
-            console.log('Initialized data array:', { totalRows, totalCols });
-          } else if (!newData.length || (newData.length === 1 && !newData[0].length)) {
-            // Fallback if no metadata
-            newData = Array(100).fill(null).map(() => Array(26).fill(null));
-            console.log('Using fallback data array size');
-          }
-
-          // Create a copy to avoid mutating state directly
-          const updatedData = newData.map(row => [...row]);
-
-          // Update the specific window in our data array
-          // Backend data is 0-indexed relative to the window
-          responseData.forEach((row, rowIdx) => {
-            const actualRow = rowStart - 1 + rowIdx; // Convert to 0-based
-            if (actualRow >= 0 && actualRow < updatedData.length) {
-              if (Array.isArray(row)) {
-                row.forEach((cell, colIdx) => {
-                  const actualCol = colStart - 1 + colIdx; // Convert to 0-based
-                  if (actualCol >= 0 && actualCol < updatedData[actualRow].length) {
-                    updatedData[actualRow][actualCol] = cell;
-                  }
-                });
+        // Create a full-size sparse array for the entire sheet
+        // But only populate the window we fetched
+        const totalRows = meta?.totalRows || Math.max(rowEnd, 1000);
+        const totalCols = meta?.totalColumns || Math.max(colEnd, 26);
+        
+        // Initialize full array with nulls
+        const newData = Array(totalRows).fill(null).map(() => Array(totalCols).fill(null));
+        
+        // Fill only the window we fetched
+        responseData.forEach((row, rowIdx) => {
+          const actualRow = rowStart - 1 + rowIdx; // Convert to 0-based
+          if (actualRow >= 0 && actualRow < newData.length && Array.isArray(row)) {
+            row.forEach((cell, colIdx) => {
+              const actualCol = colStart - 1 + colIdx; // Convert to 0-based
+              if (actualCol >= 0 && actualCol < newData[actualRow].length) {
+                newData[actualRow][actualCol] = cell;
               }
-            }
-          });
-
-          console.log('Data updated, sample:', updatedData.slice(0, 5).map(r => r.slice(0, 5)));
-          console.log('Full data dimensions:', { rows: updatedData.length, cols: updatedData[0]?.length || 0 });
-          setLoading(false);
-          return updatedData;
+            });
+          }
         });
-      } else {
-        console.warn('No data array in response:', response.data);
-        setLoading(false);
-        // Initialize with empty data if no data returned
-        if (meta) {
-          const totalRows = Math.max(meta.totalRows || 1, 1);
-          const totalCols = Math.max(meta.totalColumns || 1, 1);
-          setData(Array(totalRows).fill(null).map(() => Array(totalCols).fill(null)));
-        }
+
+        // REPLACE data (not merge/append)
+        setData(newData);
+        currentWindowRef.current = { rowStart, rowEnd, colStart, colEnd };
+        
+        console.log('✅ Window loaded:', { 
+          rows: newData.length, 
+          cols: newData[0]?.length || 0,
+          window: { rowStart, rowEnd, colStart, colEnd }
+        });
       }
+      
+      setLoading(false);
     } catch (error) {
-      console.error('Error fetching data window:', error);
-      console.error('Error details:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-        sheetId
-      });
+      console.error('❌ Error fetching window:', error);
       setError(error.response?.data?.message || error.message || 'Failed to load spreadsheet data');
       setLoading(false);
-      // Set to empty array if error occurs
       setData([[]]);
     } finally {
       loadingRef.current = false;
     }
-  }, [sheetId, sheetIndex]);
+  }, [workbookId, sheetIndex]);
+
+  // Track previous viewport to detect scroll direction
+  const previousViewportRef = useRef({ row: 0, col: 0 });
 
   /**
-   * Initial data load - fetch first window to get metadata and initial data
+   * Handle scroll - lazy load both rows and columns
+   * Uses afterScroll hook which fires on any scroll
    */
-  useEffect(() => {
-    if (!sheetId) return;
-
-    // Reset state when sheetId changes
-    setData([[]]);
-    setLoading(true);
-    setError(null);
-    metadataRef.current = null;
-    loadingRef.current = false;
-
-    const loadInitialData = async () => {
-      // Fetch a small window first to get metadata
-      await fetchDataWindow(1, 100, 1, 30);
-    };
-
-    loadInitialData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheetId]); // fetchDataWindow is stable, so we can safely omit it
-
-  /**
-   * Log when Handsontable instance is ready
-   */
-  useEffect(() => {
-    const checkInstance = () => {
-      if (hotRef.current?.hotInstance) {
-        const instance = hotRef.current.hotInstance;
-        console.log('Handsontable instance ready:', {
-          rows: instance.countRows(),
-          cols: instance.countCols(),
-          dataRows: data.length,
-          dataCols: data[0]?.length || 0
-        });
-      }
-    };
-    
-    const timer = setTimeout(checkInstance, 500);
-    return () => clearTimeout(timer);
-  }, [data.length]);
-
-  /**
-   * Mark component as mounted
-   */
-  useEffect(() => {
-    isMountedRef.current = true;
-    return () => {
-      isMountedRef.current = false;
-      if (debounceTimerRef.current) {
-        clearTimeout(debounceTimerRef.current);
-      }
-    };
-  }, []);
-
-  /**
-   * Handle cell changes with debouncing
-   */
-  const handleAfterChange = useCallback((changes, source) => {
-    if (!changes || source === 'loadData') return;
-
-    // Store changes for batch update
-    changes.forEach(([row, col, oldValue, newValue]) => {
-      if (oldValue !== newValue) {
-        pendingChangesRef.current.push({
-          row: row + 1, // Convert to 1-based for backend
-          col: col + 1, // Convert to 1-based for backend
-          value: newValue
-        });
-      }
-    });
-
-    // Debounce backend updates
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-
-    debounceTimerRef.current = setTimeout(() => {
-      if (pendingChangesRef.current.length > 0 && onDataChange) {
-        onDataChange(pendingChangesRef.current);
-        pendingChangesRef.current = [];
-      }
-    }, 1000); // 1 second debounce
-  }, [onDataChange]);
-
-  /**
-   * Handle viewport scrolling - fetch new data windows as needed
-   * Using afterScroll callback which fires after scroll events
-   */
-  const handleAfterScroll = useCallback(() => {
+  const handleScroll = useCallback(() => {
     if (!hotRef.current?.hotInstance || !metadataRef.current || loadingRef.current) return;
 
     const instance = hotRef.current.hotInstance;
     
     try {
-      // Get viewport information using Handsontable API
+      // Get current viewport
       const viewport = instance.view.getViewport();
       const firstVisibleRow = viewport[0];
       const lastVisibleRow = viewport[2];
       const firstVisibleCol = viewport[1];
       const lastVisibleCol = viewport[3];
       
-      // Fetch data for visible area + buffer
-      const rowStart = Math.max(1, firstVisibleRow + 1); // Convert to 1-based
-      const rowEnd = Math.min(metadataRef.current.totalRows, lastVisibleRow + 50); // Add buffer
-      const colStart = Math.max(1, firstVisibleCol + 1); // Convert to 1-based
-      const colEnd = Math.min(metadataRef.current.totalColumns, lastVisibleCol + 20); // Add buffer
-
-      fetchDataWindow(rowStart, rowEnd, colStart, colEnd);
-    } catch (error) {
-      // Fallback: fetch a reasonable window if API fails
-      if (metadataRef.current) {
-        fetchDataWindow(1, Math.min(100, metadataRef.current.totalRows), 1, Math.min(30, metadataRef.current.totalColumns));
+      if (firstVisibleRow === null || lastVisibleRow === null || 
+          firstVisibleCol === null || lastVisibleCol === null) {
+        return;
       }
+      
+      // Check if viewport actually changed
+      const prevViewport = previousViewportRef.current;
+      if (prevViewport.row === firstVisibleRow && prevViewport.col === firstVisibleCol) {
+        return; // No change, skip
+      }
+      
+      previousViewportRef.current = { row: firstVisibleRow, col: firstVisibleCol };
+      
+      // Calculate window with buffer for both dimensions
+      const rowStart = Math.max(1, firstVisibleRow - SCROLL_BUFFER + 1); // Convert to 1-based
+      const rowEnd = Math.min(
+        metadataRef.current.totalRows, 
+        lastVisibleRow + SCROLL_BUFFER + 1
+      );
+      
+      const colStart = Math.max(1, firstVisibleCol - SCROLL_BUFFER + 1); // Convert to 1-based
+      const colEnd = Math.min(
+        metadataRef.current.totalColumns,
+        lastVisibleCol + SCROLL_BUFFER + 1
+      );
+      
+      // Debounce scroll requests
+      if (scrollDebounceTimerRef.current) {
+        clearTimeout(scrollDebounceTimerRef.current);
+      }
+      
+      scrollDebounceTimerRef.current = setTimeout(() => {
+        fetchDataWindow(rowStart, rowEnd, colStart, colEnd);
+      }, SCROLL_DEBOUNCE_MS);
+      
+    } catch (error) {
+      console.error('Error in scroll handler:', error);
     }
   }, [fetchDataWindow]);
 
-  if (!sheetId) {
+  /**
+   * Handle cell changes - sync to backend
+   */
+  const handleAfterChange = useCallback((changes, source) => {
+    // CRITICAL: Ignore programmatic changes to prevent loops
+    if (!changes || source === 'loadData' || source === 'updateData' || source === 'CopyPaste.paste') {
+      return;
+    }
+
+    if (!workbookId || !hotRef.current?.hotInstance) return;
+
+    const instance = hotRef.current.hotInstance;
+    
+    // Collect changes
+    changes.forEach(([row, col, oldValue, newValue]) => {
+      if (oldValue !== newValue) {
+        pendingEditsRef.current.push({
+          row: row + 1, // Convert to 1-based for backend
+          col: col + 1,
+          value: newValue
+        });
+      }
+    });
+
+    // Debounce edit sync
+    if (pendingEditTimerRef.current) {
+      clearTimeout(pendingEditTimerRef.current);
+    }
+
+    pendingEditTimerRef.current = setTimeout(async () => {
+      const edits = [...pendingEditsRef.current];
+      pendingEditsRef.current = [];
+
+      // Sync each edit to backend
+      for (const edit of edits) {
+        try {
+          await updateCell(workbookId, sheetIndex, edit.row, edit.col, edit.value);
+          console.log('✅ Cell synced:', edit);
+        } catch (error) {
+          console.error('❌ Failed to sync cell:', edit, error);
+          // Re-add failed edit to retry queue
+          pendingEditsRef.current.push(edit);
+        }
+      }
+
+      // Notify parent component
+      if (onDataChange && edits.length > 0) {
+        onDataChange(edits);
+      }
+    }, EDIT_DEBOUNCE_MS);
+  }, [workbookId, sheetIndex, onDataChange]);
+
+  /**
+   * Initial load - fetch first window
+   */
+  useEffect(() => {
+    if (!workbookId) {
+      setData([[]]);
+      setLoading(false);
+      return;
+    }
+
+    workbookIdRef.current = workbookId;
+    
+    // Reset state when workbook or sheet changes
+    setData([[]]);
+    setLoading(true);
+    setError(null);
+    metadataRef.current = null;
+    currentWindowRef.current = { rowStart: 0, rowEnd: 0, colStart: 0, colEnd: 0 };
+    loadingRef.current = false;
+
+    // Load initial window
+    const loadInitial = async () => {
+      await fetchDataWindow(1, 100, 1, 30, true);
+    };
+
+    loadInitial();
+  }, [workbookId, sheetIndex, fetchDataWindow]);
+
+  /**
+   * Update Handsontable when data changes
+   */
+  useEffect(() => {
+    if (!hotRef.current?.hotInstance || data.length === 0) return;
+
+    const instance = hotRef.current.hotInstance;
+    
+    // Only update if data actually changed
+    const currentData = instance.getData();
+    if (JSON.stringify(currentData) !== JSON.stringify(data)) {
+      // Use loadData to replace entire dataset
+      instance.loadData(data);
+      console.log('📊 Data loaded into Handsontable');
+    }
+  }, [data]);
+
+  // Calculate container height
+  const [containerHeight, setContainerHeight] = useState(() => 
+    typeof window !== 'undefined' ? window.innerHeight - 120 : 600
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      setContainerHeight(window.innerHeight - 120);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      if (scrollDebounceTimerRef.current) {
+        clearTimeout(scrollDebounceTimerRef.current);
+      }
+      if (pendingEditTimerRef.current) {
+        clearTimeout(pendingEditTimerRef.current);
+      }
+    };
+  }, []);
+
+  if (!workbookId) {
     return (
       <div className="flex items-center justify-center h-full text-slate-500">
         No file selected
@@ -253,7 +318,6 @@ const Spreadsheet = ({ filePath, sheetIndex = 0, onDataChange }) => {
     );
   }
 
-  // Show loading or error state
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-red-500">
@@ -263,22 +327,7 @@ const Spreadsheet = ({ filePath, sheetIndex = 0, onDataChange }) => {
     );
   }
 
-  // Ensure we have valid data structure
   const displayData = data.length > 0 && data[0]?.length > 0 ? data : [[]];
-
-  // Calculate container height with state to trigger re-renders on resize
-  const [containerHeight, setContainerHeight] = useState(() => 
-    typeof window !== 'undefined' ? window.innerHeight - 120 : 600
-  );
-
-  useEffect(() => {
-    const handleResize = () => {
-      setContainerHeight(window.innerHeight - 120);
-    };
-
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
   return (
     <div
@@ -298,7 +347,7 @@ const Spreadsheet = ({ filePath, sheetIndex = 0, onDataChange }) => {
         </div>
       )}
       <HotTable
-        key={sheetId} // Force re-render when file changes
+        key={`${workbookId}-${sheetIndex}`} // Force re-render when workbook or sheet changes
         ref={hotRef}
         data={displayData}
         colHeaders={true}
@@ -313,23 +362,20 @@ const Spreadsheet = ({ filePath, sheetIndex = 0, onDataChange }) => {
         manualRowResize={true}
         manualColumnResize={true}
         renderAllRows={false}
-        viewportRowRenderingOffset={20}
-        viewportColumnRenderingOffset={10}
+        viewportRowRenderingOffset={SCROLL_BUFFER}
+        viewportColumnRenderingOffset={SCROLL_BUFFER}
         licenseKey="non-commercial-and-evaluation"
         themeName="ht-theme-main"
         afterChange={handleAfterChange}
-        afterScroll={handleAfterScroll}
+        afterScroll={handleScroll}
         afterInit={() => {
-          console.log('Handsontable initialized');
+          console.log('✅ Handsontable initialized');
           if (hotRef.current?.hotInstance) {
             const instance = hotRef.current.hotInstance;
-            console.log('Instance after init:', {
+            console.log('Instance info:', {
               rows: instance.countRows(),
-              cols: instance.countCols(),
-              containerHeight: containerHeight
+              cols: instance.countCols()
             });
-            // Force render
-            instance.render();
           }
         }}
       />
@@ -338,4 +384,3 @@ const Spreadsheet = ({ filePath, sheetIndex = 0, onDataChange }) => {
 };
 
 export default React.memo(Spreadsheet);
-

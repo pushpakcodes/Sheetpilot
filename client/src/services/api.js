@@ -34,8 +34,31 @@ export const getFiles = () => api.get('/excel/files');
  * @param {number} sheetIndex - Sheet index (0-based, defaults to 0)
  * @returns {Promise<Object>} Windowed data with metadata
  */
-export const getSheetWindow = (sheetId, rowStart, rowEnd, colStart, colEnd, sheetIndex = 0) => {
-    return api.get(`/excel/sheets/${sheetId}/window`, {
+/**
+ * Get workbook metadata (all sheets with dimensions)
+ * @param {string} workbookId - File identifier (filename or path)
+ * @returns {Promise<Object>} Workbook metadata with sheets array
+ */
+export const getWorkbookMetadata = (workbookId) => {
+    const encodedId = encodeURIComponent(workbookId);
+    return api.get(`/excel/workbook/${encodedId}/metadata`);
+};
+
+/**
+ * Fetch windowed/sliced data from an Excel sheet
+ * This enables virtualized rendering by fetching only visible rows/columns
+ * 
+ * @param {string} workbookId - File identifier (filename or path)
+ * @param {number} rowStart - Starting row (1-based)
+ * @param {number} rowEnd - Ending row (1-based, inclusive)
+ * @param {number} colStart - Starting column (1-based)
+ * @param {number} colEnd - Ending column (1-based, inclusive)
+ * @param {number} sheetIndex - Sheet index (0-based, defaults to 0)
+ * @returns {Promise<Object>} Windowed data with metadata
+ */
+export const getSheetWindow = (workbookId, rowStart, rowEnd, colStart, colEnd, sheetIndex = 0) => {
+    const encodedId = encodeURIComponent(workbookId);
+    return api.get(`/excel/workbook/${encodedId}/window`, {
         params: {
             rowStart,
             rowEnd,
@@ -43,6 +66,25 @@ export const getSheetWindow = (sheetId, rowStart, rowEnd, colStart, colEnd, shee
             colEnd,
             sheetIndex
         }
+    });
+};
+
+/**
+ * Update a single cell in the workbook
+ * @param {string} workbookId - File identifier (filename or path)
+ * @param {number} sheetIndex - Sheet index (0-based)
+ * @param {number} row - Row number (1-based)
+ * @param {number} col - Column number (1-based)
+ * @param {any} value - New cell value
+ * @returns {Promise<Object>} Success response
+ */
+export const updateCell = (workbookId, sheetIndex, row, col, value) => {
+    const encodedId = encodeURIComponent(workbookId);
+    return api.post(`/excel/workbook/${encodedId}/cell`, {
+        sheetIndex,
+        row,
+        col,
+        value
     });
 };
 

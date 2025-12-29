@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { uploadFile, processCommand, getFiles } from '../services/api';
+import { uploadFile, processCommand, getFiles, getWorkbookMetadata } from '../services/api';
 import Navbar from '../components/Navbar';
 import FileUploader from '../components/FileUploader';
 import ExcelPreview from '../components/ExcelPreview';
 import VirtualizedExcelView from '../components/VirtualizedExcelView';
 import Spreadsheet from '../components/Spreadsheet';
+import SheetTabs from '../components/SheetTabs';
 import Ribbon from '../components/Ribbon';
 import ChatSidebar from '../components/ChatSidebar';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -17,6 +18,8 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(false);
   const [chatHistory, setChatHistory] = useState([]);
   const [fileHistory, setFileHistory] = useState([]); // Undo stack
+  const [workbookMetadata, setWorkbookMetadata] = useState(null);
+  const [activeSheetId, setActiveSheetId] = useState(0);
 
   const handleUpload = async (file) => {
     setLoading(true);
@@ -30,6 +33,18 @@ const Dashboard = () => {
       setCurrentFile(data);
       setPreviewData(data.preview);
       setFileHistory([]); // Reset undo stack on new upload
+      setActiveSheetId(0); // Reset to first sheet
+      
+      // Fetch workbook metadata for sheet tabs
+      try {
+        const metadataResponse = await getWorkbookMetadata(data.filePath);
+        setWorkbookMetadata(metadataResponse.data);
+        console.log('📊 Workbook metadata loaded:', metadataResponse.data);
+      } catch (metadataError) {
+        console.error('Failed to load workbook metadata:', metadataError);
+        // Continue without metadata - sheet tabs won't show
+      }
+      
       setChatHistory(prev => [...prev, { type: 'bot', content: `Successfully uploaded ${file.name}. What would you like to do with it?` }]);
     } catch (error) {
       console.error(error);
@@ -37,6 +52,12 @@ const Dashboard = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSheetChange = (sheetId) => {
+    console.log('📑 Switching to sheet:', sheetId);
+    setActiveSheetId(sheetId);
+    // Spreadsheet component will handle the sheet change via sheetIndex prop
   };
 
   const handleCommand = async (command) => {
@@ -118,14 +139,25 @@ const Dashboard = () => {
             ) : (
                // Use Handsontable Spreadsheet for Excel-like experience
                currentFile?.filePath ? (
-                 <Spreadsheet 
-                   filePath={currentFile.filePath} 
-                   sheetIndex={0}
-                   onDataChange={(changes) => {
-                     // Handle cell changes - can sync to backend here
-                     console.log('Cell changes:', changes);
-                   }}
-                 />
+                 <>
+                   <div className="flex-1 overflow-hidden">
+                     <Spreadsheet 
+                       filePath={currentFile.filePath} 
+                       sheetIndex={activeSheetId}
+                       onDataChange={(changes) => {
+                         // Handle cell changes - can sync to backend here
+                         console.log('Cell changes:', changes);
+                       }}
+                     />
+                   </div>
+                   {workbookMetadata && workbookMetadata.sheets && (
+                     <SheetTabs
+                       sheets={workbookMetadata.sheets}
+                       activeSheetId={activeSheetId}
+                       onSheetChange={handleSheetChange}
+                     />
+                   )}
+                 </>
                ) : (
                  <ExcelPreview data={previewData} />
                )

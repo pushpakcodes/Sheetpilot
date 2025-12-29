@@ -1,6 +1,6 @@
 import User from '../models/User.js';
 import { executeAICommand } from '../services/aiService.js';
-import { getPreviewData, getWindowedSheetData } from '../services/excelService.js';
+import { getPreviewData, getWindowedSheetData, getWorkbookMetadata, updateCell } from '../services/excelService.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -26,9 +26,13 @@ export const uploadExcel = async (req, res) => {
 
   const preview = await getPreviewData(req.file.path);
 
+  // Normalize path separators to forward slashes for cross-platform compatibility
+  // This ensures the path works the same on Windows, Linux, and Mac
+  const normalizedPath = req.file.path.replace(/\\/g, '/');
+
   res.send({
       message: 'File uploaded successfully',
-      filePath: req.file.path,
+      filePath: normalizedPath,
       filename: req.file.filename,
       preview
   });
@@ -72,11 +76,181 @@ export const getUserFiles = async (req, res) => {
  * - A filename (if file is in uploads folder)
  * - A full file path (for uploaded files)
  */
+/**
+ * Get workbook metadata (all sheets with dimensions)
+ * GET /api/excel/workbook/:workbookId/metadata
+ */
+export const getWorkbookMetadataController = async (req, res) => {
+    try {
+        let { workbookId } = req.params;
+        workbookId = decodeURIComponent(workbookId);
+        
+        // Resolve file path
+        let filePath = resolveFilePath(workbookId);
+        
+        if (!filePath) {
+            return res.status(404).json({ 
+                message: `Workbook not found: ${workbookId}` 
+            });
+        }
+        
+        const metadata = await getWorkbookMetadata(filePath);
+        res.json(metadata);
+        
+    } catch (error) {
+        console.error('Error fetching workbook metadata:', error);
+        res.status(500).json({ 
+            message: 'Error fetching workbook metadata', 
+            error: error.message 
+        });
+    }
+};
+
+/**
+ * Update a single cell in the workbook
+ * POST /api/excel/workbook/:workbookId/cell
+ * Body: { sheetIndex, row, col, value }
+ */
+export const updateCellController = async (req, res) => {
+    try {
+        let { workbookId } = req.params;
+        workbookId = decodeURIComponent(workbookId);
+        const { sheetIndex, row, col, value } = req.body;
+        
+        // Validate required parameters
+        if (sheetIndex === undefined || !row || !col || value === undefined) {
+            return res.status(400).json({ 
+                message: 'Missing required parameters: sheetIndex, row, col, value' 
+            });
+        }
+        
+        // Validate numeric parameters
+        const parsedSheetIndex = parseInt(sheetIndex, 10);
+        const parsedRow = parseInt(row, 10);
+        const parsedCol = parseInt(col, 10);
+        
+        if (isNaN(parsedSheetIndex) || isNaN(parsedRow) || isNaN(parsedCol)) {
+            return res.status(400).json({ 
+                message: 'Invalid parameters: sheetIndex, row, and col must be numbers' 
+            });
+        }
+        
+        if (parsedRow < 1 || parsedCol < 1) {
+            return res.status(400).json({ 
+                message: 'Row and column must be >= 1 (Excel uses 1-based indexing)' 
+            });
+        }
+        
+        // Resolve file path
+        let filePath = resolveFilePath(workbookId);
+        
+        if (!filePath) {
+            return res.status(404).json({ 
+                message: `Workbook not found: ${workbookId}` 
+            });
+        }
+        
+        // Update the cell
+        await updateCell(filePath, parsedSheetIndex, parsedRow, parsedCol, value);
+        
+        res.json({ 
+            success: true, 
+            message: 'Cell updated successfully' 
+        });
+        
+    } catch (error) {
+        console.error('Error updating cell:', error);
+        res.status(500).json({ 
+            message: 'Error updating cell', 
+            error: error.message 
+        });
+    }
+};
+
+/**
+ * Helper function to resolve file path from workbookId
+ * Handles various path formats and normalizes them
+ */
+const resolveFilePath = (workbookId) => {
+    // Normalize path separators - convert all to forward slashes first, then to OS-specific
+    const normalizedId = workbookId.replace(/\\/g, '/').replace(/\//g, path.sep);
+    
+    const uploadsDirRelative = path.join(process.cwd(), 'uploads');
+    const uploadsDirAbsolute = path.join(__dirname, '../../uploads');
+    
+    // Strategy 1: Check if it's already an absolute path that exists
+    if (path.isAbsolute(normalizedId) && fs.existsSync(normalizedId)) {
+        return normalizedId;
+    }
+    
+    // Strategy 2: Check if it's a relative path from current working directory
+    if (fs.existsSync(normalizedId)) {
+        return path.resolve(normalizedId);
+    }
+    
+    // Strategy 3: If it contains 'uploads', try reconstructing the path
+    if (normalizedId.includes('uploads')) {
+        // Extract the part after 'uploads/'
+        const parts = normalizedId.split('uploads');
+        const afterUploads = parts[parts.length - 1].replace(/^[\/\\]/, ''); // Remove leading slash
+        
+        // Try with relative uploads dir
+        const relativePath = path.join(uploadsDirRelative, afterUploads);
+        if (fs.existsSync(relativePath)) {
+            return relativePath;
+        }
+        
+        // Try with absolute uploads dir
+        const absolutePath = path.join(uploadsDirAbsolute, afterUploads);
+        if (fs.existsSync(absolutePath)) {
+            return absolutePath;
+        }
+    }
+    
+    // Strategy 4: Try as filename in uploads directory
+    const filename = path.basename(normalizedId);
+    const filenameRelative = path.join(uploadsDirRelative, filename);
+    if (fs.existsSync(filenameRelative)) {
+        return filenameRelative;
+    }
+    
+    const filenameAbsolute = path.join(uploadsDirAbsolute, filename);
+    if (fs.existsSync(filenameAbsolute)) {
+        return filenameAbsolute;
+    }
+    
+    // Strategy 5: Try with relative path from cwd
+    const relativePath = path.join(uploadsDirRelative, normalizedId);
+    if (fs.existsSync(relativePath)) {
+        return relativePath;
+    }
+    
+    // Strategy 6: Try with absolute path from server directory
+    const absolutePath = path.join(uploadsDirAbsolute, normalizedId);
+    if (fs.existsSync(absolutePath)) {
+        return absolutePath;
+    }
+    
+    // Log all attempted paths for debugging
+    console.error('❌ File resolution failed for:', workbookId);
+    console.error('Attempted paths:', {
+        normalized: normalizedId,
+        relativePath,
+        absolutePath,
+        filenameRelative,
+        filenameAbsolute,
+        cwd: process.cwd(),
+        __dirname: __dirname
+    });
+    
+    return null;
+};
+
 export const getSheetWindow = async (req, res) => {
     try {
-        // Decode URL-encoded sheetId (Express usually does this automatically, but be explicit)
-        let { sheetId } = req.params;
-        sheetId = decodeURIComponent(sheetId);
+        // Handle both workbookId (new) and sheetId (legacy) parameter names
+        let workbookId = req.params.workbookId || req.params.sheetId;
+        workbookId = decodeURIComponent(workbookId);
         const { rowStart, rowEnd, colStart, colEnd, sheetIndex = 0 } = req.query;
         
         // Validate required query parameters
@@ -114,38 +288,19 @@ export const getSheetWindow = async (req, res) => {
             });
         }
         
-        // Resolve file path
-        // sheetId can be a filename or a full path
-        let filePath;
+        // Resolve file path using helper function
+        const filePath = resolveFilePath(workbookId);
         
-        // Get uploads directory - multer saves to 'uploads/' relative to process.cwd()
-        // We need to check both possible locations:
-        // 1. Relative to process.cwd() (if server runs from server/ directory)
-        // 2. Relative to server directory (if server runs from project root)
-        const uploadsDirRelative = path.join(process.cwd(), 'uploads');
-        const uploadsDirAbsolute = path.join(__dirname, '../../uploads');
-        
-        // Check if it's a full path first
-        if (fs.existsSync(sheetId)) {
-            filePath = sheetId;
-        } else {
-            // Try relative to process.cwd() first (multer's default behavior)
-            const relativePath = path.join(uploadsDirRelative, sheetId);
-            if (fs.existsSync(relativePath)) {
-                filePath = relativePath;
-            } else {
-                // Try absolute path from server directory
-                const absolutePath = path.join(uploadsDirAbsolute, sheetId);
-                if (fs.existsSync(absolutePath)) {
-                    filePath = absolutePath;
-                } else {
-                    console.error(`File not found: ${sheetId}`);
-                    console.error(`Checked paths: ${relativePath}, ${absolutePath}`);
-                    return res.status(404).json({ 
-                        message: `File not found: ${sheetId}` 
-                    });
-                }
-            }
+        if (!filePath) {
+            console.error(`File not found: ${workbookId}`);
+            console.error('Attempted paths:', {
+                original: workbookId,
+                uploadsRelative: path.join(process.cwd(), 'uploads', workbookId),
+                uploadsAbsolute: path.join(__dirname, '../../uploads', workbookId)
+            });
+            return res.status(404).json({ 
+                message: `File not found: ${workbookId}` 
+            });
         }
         
         // Fetch windowed data

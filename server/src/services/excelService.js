@@ -213,6 +213,59 @@ const sortData = async (worksheet, { column, order }) => {
  * @param {number} colEnd - Ending column index (1-based, inclusive)
  * @returns {Promise<Object>} Windowed data with metadata
  */
+/**
+ * Get workbook metadata (all sheets with dimensions)
+ * Returns sheet information without loading cell data
+ * 
+ * @param {string} filePath - Path to the Excel file
+ * @returns {Promise<Object>} Workbook metadata with sheets array
+ */
+export const getWorkbookMetadata = async (filePath) => {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    
+    const sheets = [];
+    workbook.eachSheet((worksheet, sheetId) => {
+        sheets.push({
+            sheetId: sheetId - 1, // Convert to 0-based for frontend
+            name: worksheet.name,
+            totalRows: worksheet.rowCount || 0,
+            totalCols: worksheet.columnCount || 0
+        });
+    });
+    
+    return { sheets };
+};
+
+/**
+ * Update a single cell in the workbook
+ * 
+ * @param {string} filePath - Path to the Excel file
+ * @param {number} sheetIndex - Sheet index (0-based)
+ * @param {number} row - Row number (1-based, Excel convention)
+ * @param {number} col - Column number (1-based, Excel convention)
+ * @param {any} value - New cell value
+ * @returns {Promise<void>}
+ */
+export const updateCell = async (filePath, sheetIndex, row, col, value) => {
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.readFile(filePath);
+    
+    // Validate sheet index
+    if (sheetIndex < 0 || sheetIndex >= workbook.worksheets.length) {
+        throw new Error(`Sheet index ${sheetIndex} is out of range. Total sheets: ${workbook.worksheets.length}`);
+    }
+    
+    const worksheet = workbook.worksheets[sheetIndex];
+    const cell = worksheet.getCell(row, col);
+    
+    // Set the cell value
+    cell.value = value;
+    
+    // Save the workbook back to file
+    await workbook.xlsx.writeFile(filePath);
+};
+
 export const getWindowedSheetData = async (filePath, sheetIndex, rowStart, rowEnd, colStart, colEnd) => {
     // Load the full workbook (required by ExcelJS)
     // This is done once per request - in production, you might want to cache workbooks
