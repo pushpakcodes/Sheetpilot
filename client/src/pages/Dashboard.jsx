@@ -4,6 +4,7 @@ import Navbar from '../components/Navbar';
 import FileUploader from '../components/FileUploader';
 import ExcelPreview from '../components/ExcelPreview';
 import VirtualizedExcelView from '../components/VirtualizedExcelView';
+import Spreadsheet from '../components/Spreadsheet';
 import Ribbon from '../components/Ribbon';
 import ChatSidebar from '../components/ChatSidebar';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -115,11 +116,15 @@ const Dashboard = () => {
                 </div>
               </motion.div>
             ) : (
-               // Use virtualized view for large files, fallback to preview for small files
+               // Use Handsontable Spreadsheet for Excel-like experience
                currentFile?.filePath ? (
-                 <VirtualizedExcelView 
+                 <Spreadsheet 
                    filePath={currentFile.filePath} 
                    sheetIndex={0}
+                   onDataChange={(changes) => {
+                     // Handle cell changes - can sync to backend here
+                     console.log('Cell changes:', changes);
+                   }}
                  />
                ) : (
                  <ExcelPreview data={previewData} />

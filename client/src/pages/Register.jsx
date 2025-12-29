@@ -65,6 +65,7 @@ const Register = () => {
             onChange={(e) => setPassword(e.target.value)}
             required
             placeholder="••••••••"
+            autoComplete="new-password"
           />
           <Button type="submit" className="w-full" isLoading={loading}>
             Sign Up

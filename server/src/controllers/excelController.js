@@ -3,6 +3,10 @@ import { executeAICommand } from '../services/aiService.js';
 import { getPreviewData, getWindowedSheetData } from '../services/excelService.js';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 export const uploadExcel = async (req, res) => {
   if (!req.file) {
@@ -70,7 +74,9 @@ export const getUserFiles = async (req, res) => {
  */
 export const getSheetWindow = async (req, res) => {
     try {
-        const { sheetId } = req.params;
+        // Decode URL-encoded sheetId (Express usually does this automatically, but be explicit)
+        let { sheetId } = req.params;
+        sheetId = decodeURIComponent(sheetId);
         const { rowStart, rowEnd, colStart, colEnd, sheetIndex = 0 } = req.query;
         
         // Validate required query parameters
@@ -111,18 +117,34 @@ export const getSheetWindow = async (req, res) => {
         // Resolve file path
         // sheetId can be a filename or a full path
         let filePath;
-        const uploadsDir = path.join(process.cwd(), 'server', 'uploads');
         
-        // Check if it's a full path
+        // Get uploads directory - multer saves to 'uploads/' relative to process.cwd()
+        // We need to check both possible locations:
+        // 1. Relative to process.cwd() (if server runs from server/ directory)
+        // 2. Relative to server directory (if server runs from project root)
+        const uploadsDirRelative = path.join(process.cwd(), 'uploads');
+        const uploadsDirAbsolute = path.join(__dirname, '../../uploads');
+        
+        // Check if it's a full path first
         if (fs.existsSync(sheetId)) {
             filePath = sheetId;
         } else {
-            // Try as filename in uploads directory
-            filePath = path.join(uploadsDir, sheetId);
-            if (!fs.existsSync(filePath)) {
-                return res.status(404).json({ 
-                    message: `File not found: ${sheetId}` 
-                });
+            // Try relative to process.cwd() first (multer's default behavior)
+            const relativePath = path.join(uploadsDirRelative, sheetId);
+            if (fs.existsSync(relativePath)) {
+                filePath = relativePath;
+            } else {
+                // Try absolute path from server directory
+                const absolutePath = path.join(uploadsDirAbsolute, sheetId);
+                if (fs.existsSync(absolutePath)) {
+                    filePath = absolutePath;
+                } else {
+                    console.error(`File not found: ${sheetId}`);
+                    console.error(`Checked paths: ${relativePath}, ${absolutePath}`);
+                    return res.status(404).json({ 
+                        message: `File not found: ${sheetId}` 
+                    });
+                }
             }
         }
         
