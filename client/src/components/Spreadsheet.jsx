@@ -35,6 +35,7 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
   const pendingEditTimerRef = useRef(null);
   const pendingEditsRef = useRef([]);
   const lastValidDataRef = useRef(null);
+  const proxyScrollRef = useRef(null);
   
   // Constants
   const SCROLL_BUFFER = 30; // Rows/cols to load beyond visible area
@@ -316,6 +317,29 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Sync proxy horizontal scrollbar with grid holder
+  useEffect(() => {
+    if (!hotRef.current?.hotInstance || !proxyScrollRef.current) return;
+    const instance = hotRef.current.hotInstance;
+    const holder = instance.rootElement?.querySelector('.wtHolder');
+    if (!holder) return;
+    const proxy = proxyScrollRef.current;
+    const syncProxyFromGrid = () => {
+      proxy.scrollLeft = holder.scrollLeft;
+    };
+    const syncGridFromProxy = () => {
+      holder.scrollLeft = proxy.scrollLeft;
+    };
+    holder.addEventListener('scroll', syncProxyFromGrid);
+    proxy.addEventListener('scroll', syncGridFromProxy);
+    // Initialize proxy position
+    syncProxyFromGrid();
+    return () => {
+      holder.removeEventListener('scroll', syncProxyFromGrid);
+      proxy.removeEventListener('scroll', syncGridFromProxy);
+    };
+  }, [data]);
+
   // Cleanup
   useEffect(() => {
     return () => {
@@ -367,7 +391,7 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
         position: 'relative',
         overflowX: 'auto',
         overflowY: 'hidden',
-        paddingBottom: '24px',
+        paddingBottom: '40px',
         minHeight: '400px'
       }}
     >
@@ -409,6 +433,25 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
           }
         }}
       />
+      <div
+        ref={proxyScrollRef}
+        className="custom-scrollbar"
+        style={{
+          position: 'absolute',
+          bottom: '6px',
+          left: '12px',
+          right: '12px',
+          height: '24px',
+          zIndex: 50,
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          background: 'rgba(100, 116, 139, 0.15)',
+          borderRadius: '6px'
+        }}
+        aria-label="Horizontal scroll"
+      >
+        <div style={{ width: `${100 * 100}px`, height: '1px' }} />
+      </div>
     </div>
   );
 };
