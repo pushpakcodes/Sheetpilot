@@ -234,15 +234,8 @@ export const getWorkbookMetadata = async (filePath) => {
     const sheets = workbook.worksheets
         .filter(ws => ws.state === 'visible' || ws.state === undefined) // Include visible or undefined (default is visible)
         .map(worksheet => {
-            // Use dimensions for accurate counts (handles sparse data correctly)
-            const dimensions = worksheet.dimensions;
-            const actualRows = dimensions ? dimensions.bottom : (worksheet.rowCount || 0);
-            const actualCols = dimensions ? dimensions.right : (worksheet.columnCount || 0);
-            
-            // Allow infinite scrolling by returning larger dimensions
-            const MAX_VIRTUAL_ROWS = Math.max(actualRows + 100, 10000);
-            const MAX_VIRTUAL_COLS = Math.max(actualCols + 20, 200);
-            
+            const MAX_VIRTUAL_ROWS = 1000;
+            const MAX_VIRTUAL_COLS = 100;
             return {
                 sheetId: worksheet.name,  // Use name as ID, NOT index
                 name: worksheet.name,
@@ -322,16 +315,16 @@ export const getWindowedSheetData = async (filePath, sheetId, rowStart, rowEnd, 
     const actualRows = dimensions ? dimensions.bottom : (worksheet.rowCount || 0);
     const actualCols = dimensions ? dimensions.right : (worksheet.columnCount || 0);
     
-    // Allow infinite scrolling by returning larger dimensions
-    const MAX_VIRTUAL_ROWS = Math.max(actualRows + 100, 10000);
-    const MAX_VIRTUAL_COLS = Math.max(actualCols + 20, 200);
+    // Cap totals strictly for performance
+    const MAX_VIRTUAL_ROWS = 1000;
+    const MAX_VIRTUAL_COLS = 100;
     
     // Clamp the requested window to VIRTUAL bounds, not actual bounds
     // ExcelJS uses 1-based indexing for rows and columns
-    const clampedRowStart = Math.max(1, rowStart);
-    const clampedRowEnd = Math.max(1, rowEnd); 
-    const clampedColStart = Math.max(1, colStart);
-    const clampedColEnd = Math.max(1, colEnd);
+    const clampedRowStart = Math.max(1, Math.min(rowStart, MAX_VIRTUAL_ROWS));
+    const clampedRowEnd = Math.max(1, Math.min(rowEnd, MAX_VIRTUAL_ROWS)); 
+    const clampedColStart = 1; // No column windowing
+    const clampedColEnd = MAX_VIRTUAL_COLS;
     
     // CRITICAL: Extract window data using index-based access
     // This preserves empty cells and maintains column alignment

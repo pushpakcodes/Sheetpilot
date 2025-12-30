@@ -34,6 +34,7 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
   const scrollDebounceTimerRef = useRef(null);
   const pendingEditTimerRef = useRef(null);
   const pendingEditsRef = useRef([]);
+  const lastValidDataRef = useRef(null);
   
   // Constants
   const SCROLL_BUFFER = 30; // Rows/cols to load beyond visible area
@@ -126,7 +127,6 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
       console.error('❌ Error fetching window:', error);
       setError(error.response?.data?.message || error.message || 'Failed to load spreadsheet data');
       setLoading(false);
-      setData([[]]);
     } finally {
       loadingRef.current = false;
     }
@@ -139,31 +139,33 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
    * Handle scroll - lazy load both rows and columns
    * Uses afterScroll hook which fires on any scroll
    */
-  const handleScroll = useCallback(() => {
+  const requestWindow = useCallback(() => {
     if (!hotRef.current?.hotInstance || !metadataRef.current || loadingRef.current) return;
+    if (!metadataRef.current.totalRows || !metadataRef.current.totalColumns) return;
 
     const instance = hotRef.current.hotInstance;
     
     try {
-      // Get current viewport
-      const viewport = instance.view.getViewport();
-      const firstVisibleRow = viewport[0];
-      const lastVisibleRow = viewport[2];
-      const firstVisibleCol = viewport[1];
-      const lastVisibleCol = viewport[3];
-      
-      if (firstVisibleRow === null || lastVisibleRow === null || 
-          firstVisibleCol === null || lastVisibleCol === null) {
-        return;
-      }
-      
+      // Compute viewport from DOM scroll positions to avoid API differences
+      const holder = instance.rootElement?.querySelector('.wtHolder');
+      if (!holder) return;
+
+      const scrollTop = holder.scrollTop;
+      const viewportHeight = holder.clientHeight;
+
+      const rowHeight = 28; // matches rowHeights
+
+      const firstVisibleRow = Math.max(0, Math.floor(scrollTop / rowHeight));
+      const visibleRowCount = Math.max(1, Math.ceil(viewportHeight / rowHeight));
+      const lastVisibleRow = firstVisibleRow + visibleRowCount - 1;
+
       // Check if viewport actually changed
       const prevViewport = previousViewportRef.current;
-      if (prevViewport.row === firstVisibleRow && prevViewport.col === firstVisibleCol) {
+      if (prevViewport.row === firstVisibleRow) {
         return; // No change, skip
       }
       
-      previousViewportRef.current = { row: firstVisibleRow, col: firstVisibleCol };
+      previousViewportRef.current = { row: firstVisibleRow, col: 0 };
       
       // Calculate window with buffer for both dimensions
       const rowStart = Math.max(1, firstVisibleRow - SCROLL_BUFFER + 1); // Convert to 1-based
@@ -172,11 +174,8 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
         lastVisibleRow + SCROLL_BUFFER + 1
       );
       
-      const colStart = Math.max(1, firstVisibleCol - SCROLL_BUFFER + 1); // Convert to 1-based
-      const colEnd = Math.min(
-        metadataRef.current.totalColumns,
-        lastVisibleCol + SCROLL_BUFFER + 1
-      );
+      const colStart = 1;
+      const colEnd = 100;
       
       // Debounce scroll requests
       if (scrollDebounceTimerRef.current) {
@@ -186,7 +185,7 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
       scrollDebounceTimerRef.current = setTimeout(() => {
         fetchDataWindow(rowStart, rowEnd, colStart, colEnd);
       }, SCROLL_DEBOUNCE_MS);
-      
+    
     } catch (error) {
       console.error('Error in scroll handler:', error);
     }
@@ -270,7 +269,7 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
     // Load initial window
     const loadInitial = async () => {
       if (sheetId) {
-        await fetchDataWindow(1, 100, 1, 30, true);
+        await fetchDataWindow(1, 100, 1, 100, true);
       }
     };
 
@@ -281,14 +280,24 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
    * Update Handsontable when data changes
    */
   useEffect(() => {
-    if (!hotRef.current?.hotInstance || data.length === 0) return;
+    if (!hotRef.current?.hotInstance) return;
 
     const instance = hotRef.current.hotInstance;
     
-    // Only update if data actually changed
+    const isValid2DArray = (arr) => {
+      if (!Array.isArray(arr) || arr.length === 0) return false;
+      const firstRow = arr[0];
+      if (!Array.isArray(firstRow) || firstRow.length === 0) return false;
+      return true;
+    };
+
+    if (!isValid2DArray(data)) {
+      return;
+    }
+
     const currentData = instance.getData();
     if (JSON.stringify(currentData) !== JSON.stringify(data)) {
-      // Use loadData to replace entire dataset
+      lastValidDataRef.current = data;
       instance.loadData(data);
       console.log('📊 Data loaded into Handsontable');
     }
@@ -336,7 +345,17 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
     );
   }
 
-  const displayData = data.length > 0 && data[0]?.length > 0 ? data : [[]];
+  const displayData = (() => {
+    const isValid2DArray = (arr) => {
+      if (!Array.isArray(arr) || arr.length === 0) return false;
+      const firstRow = arr[0];
+      if (!Array.isArray(firstRow) || firstRow.length === 0) return false;
+      return true;
+    };
+    if (isValid2DArray(data)) return data;
+    if (isValid2DArray(lastValidDataRef.current)) return lastValidDataRef.current;
+    return [[null]];
+  })();
 
   return (
     <div
@@ -346,7 +365,9 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
         height: `${containerHeight}px`,
         width: '100%',
         position: 'relative',
-        overflow: 'hidden',
+        overflowX: 'auto',
+        overflowY: 'hidden',
+        paddingBottom: '24px',
         minHeight: '400px'
       }}
     >
@@ -367,6 +388,7 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
         colWidths={100}
         autoRowSize={false}
         autoColumnSize={false}
+        stretchH="none"
         manualRowResize={true}
         manualColumnResize={true}
         renderAllRows={false}
@@ -375,8 +397,7 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
         licenseKey="non-commercial-and-evaluation"
         themeName="ht-theme-main"
         afterChange={handleAfterChange}
-        afterScrollHorizontally={handleScroll}
-        afterScrollVertically={handleScroll}
+        afterScrollVertically={requestWindow}
         afterInit={() => {
           console.log('✅ Handsontable initialized');
           if (hotRef.current?.hotInstance) {
