@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { uploadFile, processCommand, getFiles, getWorkbookMetadata } from '../services/api';
+import { uploadFile, processCommand, getFiles, getWorkbookMetadata, downloadWorkbook } from '../services/api';
 import Navbar from '../components/Navbar';
 import FileUploader from '../components/FileUploader';
 import ExcelPreview from '../components/ExcelPreview';
@@ -20,6 +20,7 @@ const Dashboard = () => {
   const [fileHistory, setFileHistory] = useState([]); // Undo stack
   const [workbookMetadata, setWorkbookMetadata] = useState(null);
   const [activeSheetId, setActiveSheetId] = useState(null); // Store sheet name, not index
+  const [saveSignal, setSaveSignal] = useState(0);
 
   const handleUpload = async (file) => {
     setLoading(true);
@@ -105,6 +106,27 @@ const Dashboard = () => {
     setFileHistory(prev => prev.slice(0, -1));
     setChatHistory(prev => [...prev, { type: 'user', content: 'Undo last action' }, { type: 'bot', content: 'Action undone.' }]);
   };
+  
+  const handleSave = () => {
+    setSaveSignal((s) => s + 1);
+  };
+  
+  const handleDownload = async () => {
+    if (!currentFile?.filePath) return;
+    try {
+      const blob = await downloadWorkbook(currentFile.filePath);
+      const url = URL.createObjectURL(new Blob([blob], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'workbook.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('Download failed', e);
+    }
+  };
 
   const suggestions = [
     "Sort by Revenue descending",
@@ -116,60 +138,64 @@ const Dashboard = () => {
   return (
     <div className="h-screen flex flex-col bg-slate-50 dark:bg-slate-950 font-sans transition-colors overflow-hidden">
       <Navbar />
-      <Ribbon onUndo={handleUndo} />
       
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Side - Excel Grid */}
-        <main className="flex-1 flex flex-col relative overflow-hidden bg-white dark:bg-slate-900">
-          <AnimatePresence mode="wait">
-            {!currentFile ? (
-              <motion.div
-                key="upload"
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="absolute inset-0 flex items-center justify-center bg-slate-50/50 dark:bg-slate-900/50 backdrop-blur-sm z-10 p-8"
-              >
-                <div className="max-w-xl w-full">
-                  <h1 className="text-3xl font-bold text-center mb-2 text-slate-900 dark:text-white">
-                    Start with <span className="text-green-600">SheetPilot</span>
-                  </h1>
-                  <p className="text-slate-600 dark:text-slate-400 text-center mb-8">
-                    Upload an Excel file to unlock AI-powered analysis.
-                  </p>
-                  <FileUploader onUpload={handleUpload} />
-                </div>
-              </motion.div>
-            ) : (
-               // Use Handsontable Spreadsheet for Excel-like experience
-               currentFile?.filePath ? (
-                 <>
-                   <div className="flex-1 overflow-hidden">
-                     {activeSheetId && (
-                       <Spreadsheet 
-                         filePath={currentFile.filePath} 
-                         sheetId={activeSheetId}
-                         onDataChange={(changes) => {
-                           // Handle cell changes - can sync to backend here
-                           console.log('Cell changes:', changes);
-                         }}
+        <div className="flex-1 flex flex-col min-w-0">
+          <Ribbon onUndo={handleUndo} onRedo={() => {}} onSave={handleSave} onDownload={handleDownload} />
+          
+          {/* Left Side - Excel Grid */}
+          <main className="flex-1 flex flex-col relative overflow-hidden bg-white dark:bg-slate-900">
+            <AnimatePresence mode="wait">
+              {!currentFile ? (
+                <motion.div
+                  key="upload"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="absolute inset-0 flex items-center justify-center bg-slate-50/50 dark:bg-slate-900/50 backdrop-blur-sm z-10 p-8"
+                >
+                  <div className="max-w-xl w-full">
+                    <h1 className="text-3xl font-bold text-center mb-2 text-slate-900 dark:text-white">
+                      Start with <span className="text-green-600">SheetPilot</span>
+                    </h1>
+                    <p className="text-slate-600 dark:text-slate-400 text-center mb-8">
+                      Upload an Excel file to unlock AI-powered analysis.
+                    </p>
+                    <FileUploader onUpload={handleUpload} />
+                  </div>
+                </motion.div>
+              ) : (
+                 // Use Handsontable Spreadsheet for Excel-like experience
+                 currentFile?.filePath ? (
+                   <>
+                     <div className="flex-1 overflow-hidden">
+                       {activeSheetId && (
+                         <Spreadsheet 
+                           filePath={currentFile.filePath} 
+                           sheetId={activeSheetId}
+                           saveSignal={saveSignal}
+                           onDataChange={(changes) => {
+                             // Handle cell changes - can sync to backend here
+                             console.log('Cell changes:', changes);
+                           }}
+                         />
+                       )}
+                     </div>
+                     {workbookMetadata && workbookMetadata.sheets && (
+                       <SheetTabs
+                         sheets={workbookMetadata.sheets}
+                         activeSheetId={activeSheetId}
+                         onSheetChange={handleSheetChange}
                        />
                      )}
-                   </div>
-                   {workbookMetadata && workbookMetadata.sheets && (
-                     <SheetTabs
-                       sheets={workbookMetadata.sheets}
-                       activeSheetId={activeSheetId}
-                       onSheetChange={handleSheetChange}
-                     />
-                   )}
-                 </>
-               ) : (
-                 <ExcelPreview data={previewData} />
-               )
-            )}
-          </AnimatePresence>
-        </main>
+                   </>
+                 ) : (
+                   <ExcelPreview data={previewData} />
+                 )
+              )}
+            </AnimatePresence>
+          </main>
+        </div>
 
         {/* Right Side - AI Chat */}
         <ChatSidebar 

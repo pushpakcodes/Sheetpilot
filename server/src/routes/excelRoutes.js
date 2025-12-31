@@ -5,7 +5,11 @@ import {
     getUserFiles, 
     getSheetWindow,
     getWorkbookMetadataController,
-    updateCellController
+    updateCellController,
+    addSheetController,
+    renameSheetController,
+    deleteSheetController,
+    downloadWorkbookController
 } from '../controllers/excelController.js';
 import upload from '../middleware/uploadMiddleware.js';
 import { protect, extractUser } from '../middleware/authMiddleware.js';
@@ -31,5 +35,9 @@ router.get('/sheets/:sheetId/window', extractUser, getSheetWindow);
 // Cell update endpoint
 // POST /api/excel/workbook/:workbookId/cell
 router.post('/workbook/:workbookId/cell', extractUser, updateCellController);
+router.post('/workbook/:workbookId/sheets', extractUser, addSheetController);
+router.put('/workbook/:workbookId/sheets/rename', extractUser, renameSheetController);
+router.delete('/workbook/:workbookId/sheets/:sheetId', extractUser, deleteSheetController);
+router.get('/workbook/:workbookId/download', extractUser, downloadWorkbookController);
 
 export default router;

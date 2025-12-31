@@ -5,7 +5,7 @@ import {
   FileSpreadsheet, Save, Undo, Redo, Share, ChevronDown
 } from 'lucide-react';
 
-const Ribbon = ({ onUndo, onRedo }) => {
+const Ribbon = ({ onUndo, onRedo, onSave, onDownload }) => {
   const tabs = ['Home', 'Insert', 'Draw', 'Page Layout', 'Formulas', 'Data', 'Review', 'View', 'Help'];
   
   return (
@@ -22,8 +22,11 @@ const Ribbon = ({ onUndo, onRedo }) => {
             <button onClick={onRedo} className="p-1 hover:bg-green-600 rounded transition-colors" title="Redo">
               <Redo className="h-4 w-4" />
             </button>
-            <button className="p-1 hover:bg-green-600 rounded transition-colors" title="Save">
+            <button onClick={onSave} className="p-1 hover:bg-green-600 rounded transition-colors" title="Save">
               <Save className="h-4 w-4" />
+            </button>
+            <button onClick={onDownload} className="p-1 hover:bg-green-600 rounded transition-colors" title="Download">
+              <FileSpreadsheet className="h-4 w-4" />
             </button>
           </div>
         </div>

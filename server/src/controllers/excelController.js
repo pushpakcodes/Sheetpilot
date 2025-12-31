@@ -1,6 +1,6 @@
 import User from '../models/User.js';
 import { executeAICommand } from '../services/aiService.js';
-import { getPreviewData, getWindowedSheetData, getWorkbookMetadata, updateCell } from '../services/excelService.js';
+import { getPreviewData, getWindowedSheetData, getWorkbookMetadata, updateCell, addSheet, renameSheet, deleteSheet } from '../services/excelService.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -163,6 +163,74 @@ export const updateCellController = async (req, res) => {
             message: 'Error updating cell', 
             error: error.message 
         });
+    }
+};
+
+export const addSheetController = async (req, res) => {
+    try {
+        let { workbookId } = req.params;
+        workbookId = decodeURIComponent(workbookId);
+        const { name } = req.body;
+        if (!name) {
+            return res.status(400).json({ message: 'Missing sheet name' });
+        }
+        const filePath = resolveFilePath(workbookId);
+        if (!filePath) {
+            return res.status(404).json({ message: `Workbook not found: ${workbookId}` });
+        }
+        const result = await addSheet(filePath, name);
+        res.json({ success: true, ...result });
+    } catch (error) {
+        res.status(500).json({ message: 'Error adding sheet', error: error.message });
+    }
+};
+
+export const renameSheetController = async (req, res) => {
+    try {
+        let { workbookId } = req.params;
+        workbookId = decodeURIComponent(workbookId);
+        const { sheetId, newName } = req.body;
+        if (!sheetId || !newName) {
+            return res.status(400).json({ message: 'Missing sheetId or newName' });
+        }
+        const filePath = resolveFilePath(workbookId);
+        if (!filePath) {
+            return res.status(404).json({ message: `Workbook not found: ${workbookId}` });
+        }
+        const result = await renameSheet(filePath, sheetId, newName);
+        res.json({ success: true, ...result });
+    } catch (error) {
+        res.status(500).json({ message: 'Error renaming sheet', error: error.message });
+    }
+};
+
+export const deleteSheetController = async (req, res) => {
+    try {
+        let { workbookId, sheetId } = req.params;
+        workbookId = decodeURIComponent(workbookId);
+        sheetId = decodeURIComponent(sheetId);
+        const filePath = resolveFilePath(workbookId);
+        if (!filePath) {
+            return res.status(404).json({ message: `Workbook not found: ${workbookId}` });
+        }
+        const result = await deleteSheet(filePath, sheetId);
+        res.json({ success: true, ...result });
+    } catch (error) {
+        res.status(500).json({ message: 'Error deleting sheet', error: error.message });
+    }
+};
+
+export const downloadWorkbookController = async (req, res) => {
+    try {
+        let { workbookId } = req.params;
+        workbookId = decodeURIComponent(workbookId);
+        const filePath = resolveFilePath(workbookId);
+        if (!filePath) {
+            return res.status(404).json({ message: `Workbook not found: ${workbookId}` });
+        }
+        res.download(filePath);
+    } catch (error) {
+        res.status(500).json({ message: 'Error downloading workbook', error: error.message });
     }
 };
 

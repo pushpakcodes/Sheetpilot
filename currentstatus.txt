@@ -1,0 +1,67 @@
+# SheetPilot Project Status Report
+
+## 1. Project Overview
+SheetPilot is an AI-powered spreadsheet application that allows users to upload Excel files, view/edit them in a web interface, and manipulate data using natural language commands.
+
+## 2. Technical Architecture
+
+### Client-Side (`/client`)
+- **Framework:** React + Vite
+- **Styling:** Tailwind CSS
+- **State Management:** React Hooks (useState, useEffect, useContext)
+- **Key Libraries:**
+  - `handsontable`: For the main spreadsheet grid.
+  - `@handsontable/react-wrapper`: React wrapper for Handsontable.
+  - `lucide-react`: UI icons.
+  - `framer-motion`: Animations (modals, transitions).
+  - `axios`: API communication.
+
+### Server-Side (`/server`)
+- **Runtime:** Node.js
+- **Framework:** Express.js
+- **Database:** MongoDB (via `mongoose` and `mongodb-memory-server` for local development).
+- **Excel Processing:** `exceljs` for reading/writing .xlsx files.
+- **AI Integration:** `langchain` and `openai` for processing natural language commands.
+
+## 3. Key Features & Components
+
+### A. Dashboard & Layout
+- **Dashboard (`Dashboard.jsx`):** Main container managing file state, active sheet, and layout.
+- **Ribbon (`Ribbon.jsx`):** Microsoft Excel-style toolbar.
+  - **Tabs:** Home, Insert, Draw, Page Layout, Formulas, Data, Review, View, Help.
+  - **Quick Access Toolbar:** Contains **Undo**, **Redo**, **Save**, and **Download** buttons (recently updated).
+- **Sidebar (`ChatSidebar.jsx`):** AI interaction panel for natural language commands.
+
+### B. Spreadsheet Functionality
+- **Grid (`Spreadsheet.jsx`):**
+  - Implements **Virtualization**: Loads data in windows/chunks to handle large files efficiently.
+  - **Lazy Loading:** Fetches rows/columns as the user scrolls.
+  - **Edit Sync:** Debounces cell edits and syncs them to the backend.
+  - **Scrollbar:** Custom synchronized horizontal scrollbar to ensure visibility.
+- **Tabs (`SheetTabs.jsx`):** Bottom bar for switching between different sheets in the workbook.
+
+### C. Backend Services
+- **File Management:**
+  - Upload (`/api/excel/upload`)
+  - Download (`/api/excel/workbook/:id/download`)
+- **Data Access:**
+  - Metadata (`/api/excel/workbook/:id/metadata`)
+  - Windowed Data (`/api/excel/workbook/:id/window`) - returns sparse arrays for virtualization.
+  - Cell Updates (`/api/excel/workbook/:id/cell`)
+- **AI Processing:**
+  - Command execution (`/api/excel/process`) - interprets prompts like "Sort by Revenue".
+
+## 4. Recent Changes (Current Session)
+- **UI Refinement:**
+  - Relocated **Save** and **Download** buttons from the spreadsheet grid area to the **Ribbon** (green top bar).
+  - Removed overlapping absolute-positioned buttons from `Spreadsheet.jsx`.
+  - Fixed horizontal scrollbar overlap issues.
+- **Logic Updates:**
+  - Implemented `saveSignal` mechanism in `Spreadsheet.jsx` to allow the external Save button (in Ribbon) to trigger a flush of pending cell edits.
+  - Wired `Dashboard.jsx` to pass save/download handlers to the `Ribbon`.
+
+## 5. Current State
+- The application is functional.
+- Users can upload files, view them in the grid, edit cells, switch sheets, and use AI commands.
+- Save and Download operations are fully integrated into the main UI ribbon.
+- No known critical blockers; linting checks pass.

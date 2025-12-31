@@ -258,23 +258,62 @@ export const getWorkbookMetadata = async (filePath) => {
  * @returns {Promise<void>}
  */
 export const updateCell = async (filePath, sheetId, row, col, value) => {
-    const workbook = new ExcelJS.Workbook();
-    await workbook.xlsx.readFile(filePath);
-    
-    // Get worksheet by name (NOT by index)
-    const worksheet = workbook.getWorksheet(sheetId);
-    
-    if (!worksheet) {
-        throw new Error(`Sheet "${sheetId}" not found in workbook. Available sheets: ${workbook.worksheets.map(ws => ws.name).join(', ')}`);
-    }
-    
-    const cell = worksheet.getCell(row, col);
-    
-    // Set the cell value
-    cell.value = value;
-    
-    // Save the workbook back to file
-    await workbook.xlsx.writeFile(filePath);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
+  
+  // Get worksheet by name (NOT by index)
+  const worksheet = workbook.getWorksheet(sheetId);
+  
+  if (!worksheet) {
+    throw new Error(`Sheet "${sheetId}" not found in workbook. Available sheets: ${workbook.worksheets.map(ws => ws.name).join(', ')}`);
+  }
+  
+  const cell = worksheet.getCell(row, col);
+  
+  // Set the cell value
+  cell.value = value;
+  
+  // Save the workbook back to file
+  await workbook.xlsx.writeFile(filePath);
+};
+
+export const addSheet = async (filePath, name) => {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
+  const existing = workbook.getWorksheet(name);
+  if (existing) {
+    throw new Error(`Sheet "${name}" already exists`);
+  }
+  workbook.addWorksheet(name);
+  await workbook.xlsx.writeFile(filePath);
+  return { name };
+};
+
+export const renameSheet = async (filePath, sheetId, newName) => {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
+  const worksheet = workbook.getWorksheet(sheetId);
+  if (!worksheet) {
+    throw new Error(`Sheet "${sheetId}" not found`);
+  }
+  if (workbook.getWorksheet(newName)) {
+    throw new Error(`Sheet "${newName}" already exists`);
+  }
+  worksheet.name = newName;
+  await workbook.xlsx.writeFile(filePath);
+  return { oldName: sheetId, newName };
+};
+
+export const deleteSheet = async (filePath, sheetId) => {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
+  const worksheet = workbook.getWorksheet(sheetId);
+  if (!worksheet) {
+    throw new Error(`Sheet "${sheetId}" not found`);
+  }
+  workbook.removeWorksheet(worksheet.id);
+  await workbook.xlsx.writeFile(filePath);
+  return { deleted: sheetId };
 };
 
 /**

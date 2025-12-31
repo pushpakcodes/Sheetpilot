@@ -4,6 +4,7 @@ const API_URL = 'http://localhost:5000/api';
 
 const api = axios.create({
   baseURL: API_URL,
+  timeout: 30000,
 });
 
 api.interceptors.request.use((config) => {
@@ -86,6 +87,28 @@ export const updateCell = (workbookId, sheetId, row, col, value) => {
         col,
         value
     });
+};
+
+export const addSheet = (workbookId, name) => {
+  const encodedId = encodeURIComponent(workbookId);
+  return api.post(`/excel/workbook/${encodedId}/sheets`, { name });
+};
+
+export const renameSheet = (workbookId, sheetId, newName) => {
+  const encodedId = encodeURIComponent(workbookId);
+  return api.put(`/excel/workbook/${encodedId}/sheets/rename`, { sheetId, newName });
+};
+
+export const deleteSheet = (workbookId, sheetId) => {
+  const encodedId = encodeURIComponent(workbookId);
+  const encodedSheet = encodeURIComponent(sheetId);
+  return api.delete(`/excel/workbook/${encodedId}/sheets/${encodedSheet}`);
+};
+
+export const downloadWorkbook = async (workbookId) => {
+  const encodedId = encodeURIComponent(workbookId);
+  const response = await api.get(`/excel/workbook/${encodedId}/download`, { responseType: 'blob' });
+  return response.data;
 };
 
 export default api;

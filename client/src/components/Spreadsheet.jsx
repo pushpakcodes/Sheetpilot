@@ -18,7 +18,7 @@ registerAllModules();
  * - Edit synchronization with backend
  * - Constant memory usage
  */
-const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
+const Spreadsheet = ({ filePath, sheetId, onDataChange, saveSignal }) => {
   const hotRef = useRef(null);
   const workbookIdRef = useRef(null);
   
@@ -202,8 +202,6 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
     }
 
     if (!workbookId || !hotRef.current?.hotInstance) return;
-
-    const instance = hotRef.current.hotInstance;
     
     // Collect changes
     changes.forEach(([row, col, oldValue, newValue]) => {
@@ -246,6 +244,29 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
       }
     }, EDIT_DEBOUNCE_MS);
   }, [workbookId, sheetId, onDataChange]);
+
+  const flushPendingEdits = useCallback(async () => {
+    if (!workbookId) return;
+    const edits = [...pendingEditsRef.current];
+    pendingEditsRef.current = [];
+    for (const edit of edits) {
+      try {
+        await updateCell(workbookId, sheetId, edit.row, edit.col, edit.value);
+      } catch {
+        pendingEditsRef.current.push(edit);
+      }
+    }
+  }, [workbookId, sheetId]);
+
+  useEffect(() => {
+    const run = async () => {
+      if (!workbookId) return;
+      await flushPendingEdits();
+    };
+    if (typeof saveSignal !== 'undefined') {
+      run();
+    }
+  }, [saveSignal, workbookId, flushPendingEdits]);
 
   /**
    * Initial load - fetch first window
@@ -392,6 +413,7 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
         overflowX: 'auto',
         overflowY: 'hidden',
         paddingBottom: '40px',
+        paddingTop: '14px',
         minHeight: '400px'
       }}
     >
@@ -407,7 +429,7 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
         colHeaders={true}
         rowHeaders={true}
         width="100%"
-        height={containerHeight}
+        height={containerHeight - 14}
         rowHeights={28}
         colWidths={100}
         autoRowSize={false}
@@ -420,6 +442,10 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
         viewportColumnRenderingOffset={SCROLL_BUFFER}
         licenseKey="non-commercial-and-evaluation"
         themeName="ht-theme-main"
+        enterBeginsEditing={true}
+        tabMoves={{ row: 0, col: 1 }}
+        enterMoves={{ row: 1, col: 0 }}
+        cells={(row) => (row === 0 ? { readOnly: true } : {})}
         afterChange={handleAfterChange}
         afterScrollVertically={requestWindow}
         afterInit={() => {
@@ -438,15 +464,14 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange }) => {
         className="custom-scrollbar"
         style={{
           position: 'absolute',
-          bottom: '6px',
-          left: '12px',
-          right: '12px',
-          height: '24px',
-          zIndex: 50,
+          top: '0',
+          left: '0',
+          right: '0',
+          height: '10px',
+          zIndex: 100,
           overflowX: 'auto',
           overflowY: 'hidden',
-          background: 'rgba(100, 116, 139, 0.15)',
-          borderRadius: '6px'
+          background: 'rgba(100, 116, 139, 0.1)',
         }}
         aria-label="Horizontal scroll"
       >
