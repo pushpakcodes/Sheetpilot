@@ -144,52 +144,50 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange, saveSignal }) => {
     if (!hotRef.current?.hotInstance || !metadataRef.current || loadingRef.current) return;
     if (!metadataRef.current.totalRows || !metadataRef.current.totalColumns) return;
 
-    const instance = hotRef.current.hotInstance;
-    
-    try {
-      // Compute viewport from DOM scroll positions to avoid API differences
-      const holder = instance.rootElement?.querySelector('.wtHolder');
-      if (!holder) return;
-
-      const scrollTop = holder.scrollTop;
-      const viewportHeight = holder.clientHeight;
-
-      const rowHeight = 28; // matches rowHeights
-
-      const firstVisibleRow = Math.max(0, Math.floor(scrollTop / rowHeight));
-      const visibleRowCount = Math.max(1, Math.ceil(viewportHeight / rowHeight));
-      const lastVisibleRow = firstVisibleRow + visibleRowCount - 1;
-
-      // Check if viewport actually changed
-      const prevViewport = previousViewportRef.current;
-      if (prevViewport.row === firstVisibleRow) {
-        return; // No change, skip
-      }
-      
-      previousViewportRef.current = { row: firstVisibleRow, col: 0 };
-      
-      // Calculate window with buffer for both dimensions
-      const rowStart = Math.max(1, firstVisibleRow - SCROLL_BUFFER + 1); // Convert to 1-based
-      const rowEnd = Math.min(
-        metadataRef.current.totalRows, 
-        lastVisibleRow + SCROLL_BUFFER + 1
-      );
-      
-      const colStart = 1;
-      const colEnd = 100;
-      
-      // Debounce scroll requests
-      if (scrollDebounceTimerRef.current) {
-        clearTimeout(scrollDebounceTimerRef.current);
-      }
-      
-      scrollDebounceTimerRef.current = setTimeout(() => {
-        fetchDataWindow(rowStart, rowEnd, colStart, colEnd);
-      }, SCROLL_DEBOUNCE_MS);
-    
-    } catch (error) {
-      console.error('Error in scroll handler:', error);
+    // Debounce the ENTIRE logic including DOM reads to prevent forced reflows during scroll
+    if (scrollDebounceTimerRef.current) {
+      clearTimeout(scrollDebounceTimerRef.current);
     }
+    
+    scrollDebounceTimerRef.current = setTimeout(() => {
+      try {
+        const instance = hotRef.current.hotInstance;
+        // Compute viewport from DOM scroll positions to avoid API differences
+        const holder = instance.rootElement?.querySelector('.wtHolder');
+        if (!holder) return;
+
+        const scrollTop = holder.scrollTop;
+        const viewportHeight = holder.clientHeight;
+
+        const rowHeight = 28; // matches rowHeights
+
+        const firstVisibleRow = Math.max(0, Math.floor(scrollTop / rowHeight));
+        const visibleRowCount = Math.max(1, Math.ceil(viewportHeight / rowHeight));
+        const lastVisibleRow = firstVisibleRow + visibleRowCount - 1;
+
+        // Check if viewport actually changed
+        const prevViewport = previousViewportRef.current;
+        if (prevViewport.row === firstVisibleRow) {
+          return; // No change, skip
+        }
+        
+        previousViewportRef.current = { row: firstVisibleRow, col: 0 };
+        
+        // Calculate window with buffer for both dimensions
+        const rowStart = Math.max(1, firstVisibleRow - SCROLL_BUFFER + 1); // Convert to 1-based
+        const rowEnd = Math.min(
+          metadataRef.current.totalRows, 
+          lastVisibleRow + SCROLL_BUFFER + 1
+        );
+        
+        const colStart = 1;
+        const colEnd = 100;
+        
+        fetchDataWindow(rowStart, rowEnd, colStart, colEnd);
+      } catch (error) {
+        console.error('Error in scroll handler:', error);
+      }
+    }, SCROLL_DEBOUNCE_MS);
   }, [fetchDataWindow]);
 
   /**
@@ -467,11 +465,10 @@ const Spreadsheet = ({ filePath, sheetId, onDataChange, saveSignal }) => {
           top: '0',
           left: '0',
           right: '0',
-          height: '10px',
+          height: '12px',
           zIndex: 100,
           overflowX: 'auto',
           overflowY: 'hidden',
-          background: 'rgba(100, 116, 139, 0.1)',
         }}
         aria-label="Horizontal scroll"
       >

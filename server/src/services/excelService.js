@@ -49,44 +49,26 @@ export const getPreviewData = async (filePath) => {
     return { sheets };
 };
 
-export const processExcelAction = async (filePath, actionData) => {
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.readFile(filePath);
-  const worksheet = workbook.worksheets[0]; // Assume first sheet
 
-  const { action, params } = actionData;
 
-  switch (action) {
-    case 'ADD_COLUMN':
-      await addColumn(worksheet, params);
-      break;
-    case 'HIGHLIGHT_ROWS':
-      await highlightRows(worksheet, params);
-      break;
-    case 'SORT_DATA':
-      await sortData(worksheet, params);
-      break;
-    default:
-      // For now ignore unknown actions or throw
-      console.warn(`Unsupported action: ${action}`);
-  }
-
-  const parsed = path.parse(filePath);
-  const newFilePath = path.join(parsed.dir, `${parsed.name}_${Date.now()}${parsed.ext}`);
-
-  await workbook.xlsx.writeFile(newFilePath);
-  return newFilePath;
-};
-
-const getColumnIndex = (worksheet, name) => {
-    const headerRow = worksheet.getRow(1);
+const getColumnIndex = (worksheet, name, scanDepth = 20) => {
     let colIndex = -1;
-    headerRow.eachCell((cell, colNumber) => {
-        if (cell.value && cell.value.toString().toLowerCase() === name.trim().toLowerCase()) {
-            colIndex = colNumber;
-        }
+    let foundAtRow = -1;
+
+    // Scan first N rows to find the header/key
+    worksheet.eachRow((row, rowNumber) => {
+        if (colIndex !== -1 || rowNumber > scanDepth) return;
+        
+        row.eachCell((cell, colNumber) => {
+            if (colIndex !== -1) return;
+            if (cell.value && cell.value.toString().trim().toLowerCase() === name.trim().toLowerCase()) {
+                colIndex = colNumber;
+                foundAtRow = rowNumber;
+            }
+        });
     });
-    return colIndex;
+    
+    return { colIndex, foundAtRow };
 };
 
 const colLetter = (col) => {
@@ -129,7 +111,7 @@ const highlightRows = async (worksheet, { condition, color }) => {
     if (!operator) return;
 
     const [colName, value] = condition.split(operator).map(s => s.trim());
-    const colIndex = getColumnIndex(worksheet, colName);
+    const { colIndex } = getColumnIndex(worksheet, colName);
     
     if (colIndex === -1) return;
 
@@ -166,39 +148,347 @@ const highlightRows = async (worksheet, { condition, color }) => {
 };
 
 const sortData = async (worksheet, { column, order }) => {
-    const colIndex = getColumnIndex(worksheet, column);
-    if (colIndex === -1) return;
+    const { colIndex, foundAtRow } = getColumnIndex(worksheet, column);
+    if (colIndex === -1) {
+        throw new Error(`Column "${column}" not found.`);
+    }
 
-    // Get all data rows
+    console.log(`[SORT_DATA] Sorting by "${column}" (Index: ${colIndex}, Header Row: ${foundAtRow})`);
+
+    // Get all data rows below the header
     const rows = [];
     worksheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
+        if (rowNumber <= foundAtRow) return; // Skip header and above
+        
         rows.push({
-            values: row.values, // Note: row.values is 1-based array usually, index 0 is empty? Check docs.
+            originalRowNumber: rowNumber,
+            values: row.values, 
             sortValue: row.getCell(colIndex).value
         });
     });
+
+    if (rows.length === 0) {
+        console.warn('[SORT_DATA] No data rows found to sort.');
+        return;
+    }
 
     // Sort
     rows.sort((a, b) => {
         const valA = a.sortValue;
         const valB = b.sortValue;
-        if (valA > valB) return order === 'desc' ? -1 : 1;
-        if (valA < valB) return order === 'desc' ? 1 : -1;
+
+        // Handle nulls/undefineds - push to bottom
+        if (valA == null && valB == null) return 0;
+        if (valA == null) return 1; 
+        if (valB == null) return -1;
+
+        // Try to convert to numbers for comparison
+        // We use Number() instead of parseFloat() to avoid "12abc" being treated as 12.
+        const numA = Number(valA);
+        const numB = Number(valB);
+        
+        // Check if valid numbers (and not empty strings which Number() converts to 0)
+        const isNumA = !isNaN(numA) && valA.toString().trim() !== '';
+        const isNumB = !isNaN(numB) && valB.toString().trim() !== '';
+
+        if (isNumA && isNumB) {
+            return order === 'desc' ? numB - numA : numA - numB;
+        }
+
+        // Fallback to string sorting
+        const strA = valA.toString().toLowerCase();
+        const strB = valB.toString().toLowerCase();
+        
+        if (strA > strB) return order === 'desc' ? -1 : 1;
+        if (strA < strB) return order === 'desc' ? 1 : -1;
         return 0;
     });
 
-    // Write back
-    // Warning: row.values setter might need exact array structure.
-    // ExcelJS `row.values` includes index 0 as undefined? 
-    // "The values property returns an array of values where the index corresponds to the column number."
-    // So [undefined, col1, col2, ...]
+    // Write back to the same row numbers we read from (preserving gaps if any)
+    const targetRowNumbers = rows.map(r => r.originalRowNumber).sort((a, b) => a - b);
     
-    rows.forEach((r, i) => {
-        const targetRow = worksheet.getRow(i + 2);
-        targetRow.values = r.values;
+    rows.forEach((sortedRow, i) => {
+        const targetRowIdx = targetRowNumbers[i];
+        const targetRow = worksheet.getRow(targetRowIdx);
+        targetRow.values = sortedRow.values;
     });
+    
+    console.log(`[SORT_DATA] Sorted ${rows.length} rows.`);
 };
+
+const updateKeyValue = async (worksheet, { keyColumn, keyValue, valueColumn, newValue }) => {
+    console.log(`[UPDATE_KEY_VALUE] Started. KeyCol: ${keyColumn}, KeyVal: ${keyValue}, ValCol: ${valueColumn}, NewVal: ${newValue}`);
+
+    // 1. Find Key Column
+    const { colIndex: keyColIndex, foundAtRow: keyHeaderRow } = getColumnIndex(worksheet, keyColumn);
+    if (keyColIndex === -1) {
+        throw new Error(`Key Column "${keyColumn}" not found.`);
+    }
+
+    // 2. Find Value Column
+    let valColIndex = -1;
+    if (valueColumn) {
+        const { colIndex } = getColumnIndex(worksheet, valueColumn);
+        valColIndex = colIndex;
+    }
+
+    // Fallback: If Value Column not specified or not found, assume it's the NEXT column (standard Key-Value pattern)
+    if (valColIndex === -1) {
+        valColIndex = keyColIndex + 1;
+        console.log(`[UPDATE_KEY_VALUE] Value Column not explicitly found. Defaulting to Next Column (Index: ${valColIndex})`);
+    }
+
+    let rowsUpdated = 0;
+
+    worksheet.eachRow((row, rowNumber) => {
+        // We DO NOT skip the header row for UPDATE_KEY_VALUE
+        // Reason: In Key-Value tables, the "header" (Key Label) IS the row we want to target.
+        // If it's a standard table, the header value usually won't match the target value anyway.
+
+        const keyCell = row.getCell(keyColIndex);
+        const keyVal = keyCell.value;
+
+        // Loose matching for KEY
+        const isKeyMatch = keyVal == keyValue || 
+                       (keyVal && keyValue && keyVal.toString().trim().toLowerCase() === keyValue.toString().trim().toLowerCase());
+
+        // Loose matching for VALUE (Fallback: AI might send the old value as the key)
+        const valCell = row.getCell(valColIndex);
+        const valVal = valCell.value;
+        const isValueMatch = valVal == keyValue || 
+                       (valVal && keyValue && valVal.toString().trim().toLowerCase() === keyValue.toString().trim().toLowerCase());
+
+        if (isKeyMatch || isValueMatch) {
+            const targetCell = row.getCell(valColIndex);
+            console.log(`[UPDATE_KEY_VALUE] Updating Cell [${rowNumber}, ${valColIndex}]: ${targetCell.value} -> ${newValue}`);
+            targetCell.value = newValue;
+            rowsUpdated++;
+        }
+    });
+
+    if (rowsUpdated === 0) {
+        throw new Error(`No rows updated. Key "${keyValue}" not found in column "${keyColumn}".`);
+    }
+
+    console.log(`[UPDATE_KEY_VALUE] Finished. Rows updated: ${rowsUpdated}`);
+    return rowsUpdated;
+};
+
+const setCell = async (worksheet, { cell, value }) => {
+    console.log(`[SET_CELL] Setting ${cell} to ${value}`);
+    const targetCell = worksheet.getCell(cell);
+    targetCell.value = value;
+    console.log(`[SET_CELL] Updated ${cell}`);
+};
+
+export const findAndReplace = async (worksheet, { findValue, replaceValue, column }) => {
+    console.log(`[FIND_AND_REPLACE] Started. Find: "${findValue}", Replace: "${replaceValue}", Column: "${column || 'ALL'}"`);
+
+    let targetColIndex = -1;
+    if (column) {
+        const { colIndex } = getColumnIndex(worksheet, column);
+        if (colIndex !== -1) {
+            targetColIndex = colIndex;
+            console.log(`[FIND_AND_REPLACE] Restricted to column "${column}" (Index: ${targetColIndex})`);
+        } else {
+             // If user specified a column but we can't find it as a header, 
+             // we should probably warn or try to treat 'column' as a loose hint?
+             // For strictness, let's error if specific column requested but missing.
+             // BUT, if the user said "Change entc to 12333", 'entc' might be the value, not the column.
+             // So if column not found, we might want to fallback to global search?
+             // Let's stick to strict: if column provided, it must exist.
+            throw new Error(`Column "${column}" not found.`);
+        }
+    }
+
+    let rowsUpdated = 0;
+
+    worksheet.eachRow((row, rowNumber) => {
+        row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+            // If column restriction is active, skip other columns
+            if (targetColIndex !== -1 && colNumber !== targetColIndex) return;
+
+            const cellValue = cell.value;
+            // Loose matching
+            if (cellValue == findValue || 
+               (cellValue && findValue && cellValue.toString().trim().toLowerCase() === findValue.toString().trim().toLowerCase())) {
+                
+                console.log(`[FIND_AND_REPLACE] Updating Cell [${rowNumber}, ${colNumber}]: ${cellValue} -> ${replaceValue}`);
+                cell.value = replaceValue;
+                rowsUpdated++;
+            }
+        });
+    });
+
+    if (rowsUpdated === 0) {
+        throw new Error(`No occurrences of "${findValue}" found${column ? ` in column "${column}"` : ''}.`);
+    }
+
+    return rowsUpdated;
+};
+
+const updateRowValues = async (worksheet, { filterColumn, filterValue, operation, value, targetColumn }) => {
+    console.log(`[UPDATE_ROW_VALUES] Started. Filter: ${filterColumn}=${filterValue}, Op: ${operation}, Val: ${value}, Target: ${targetColumn}`);
+    
+    // 1. Find the filter column
+    let searchColIndex = -1;
+    let headerRowIndex = 1;
+    
+    if (filterColumn) {
+        const { colIndex, foundAtRow } = getColumnIndex(worksheet, filterColumn);
+        if (colIndex !== -1) {
+            searchColIndex = colIndex;
+            headerRowIndex = foundAtRow;
+            console.log(`[UPDATE_ROW_VALUES] Column "${filterColumn}" found at index: ${colIndex} (Row ${foundAtRow})`);
+        } else {
+            throw new Error(`Filter Column "${filterColumn}" not found.`);
+        }
+    } else {
+        throw new Error(`Filter Column is required.`);
+    }
+
+    // 2. Determine Target Column
+    let targetColIndex = -1;
+    if (targetColumn) {
+        const { colIndex } = getColumnIndex(worksheet, targetColumn);
+        if (colIndex !== -1) {
+            targetColIndex = colIndex;
+            console.log(`[UPDATE_ROW_VALUES] Target Column "${targetColumn}" found at index: ${targetColIndex}`);
+        } else {
+            throw new Error(`Target Column "${targetColumn}" not found.`);
+        }
+    } else if (operation === 'SET') {
+        throw new Error(`Target Column is required for SET operation.`);
+    }
+
+    let rowsUpdated = 0;
+
+    worksheet.eachRow((row, rowNumber) => {
+        // Skip header row if we found one, otherwise process all
+        if (rowNumber === headerRowIndex && headerRowIndex !== -1) return; 
+
+        // Check if this row matches the criteria
+        const keyCell = row.getCell(searchColIndex);
+        const keyVal = keyCell.value;
+
+        // Loose matching (string vs number, case insensitive)
+        const isMatch = keyVal == filterValue || 
+                       (keyVal && filterValue && keyVal.toString().trim().toLowerCase() === filterValue.toString().trim().toLowerCase());
+
+        if (isMatch) {
+            console.log(`[UPDATE_ROW_VALUES] Match found at row ${rowNumber}. Key: ${keyVal}`);
+            
+            // Define update logic
+            const updateCell = (cell) => {
+                const currentVal = cell.value;
+                let newVal = currentVal;
+                
+                if (operation === 'SET') {
+                    newVal = value;
+                } else {
+                    // Arithmetic operations (numbers only)
+                    const numCurrent = parseFloat(currentVal);
+                    // Ensure value is treated as number for arithmetic
+                    const numValue = parseFloat(value);
+                    
+                    if (!isNaN(numCurrent) && !isNaN(numValue)) {
+                        switch (operation) {
+                            case '+': newVal = numCurrent + numValue; break;
+                            case '-': newVal = numCurrent - numValue; break;
+                            case '*': newVal = numCurrent * numValue; break;
+                            case '/': if (numValue !== 0) newVal = numCurrent / numValue; break;
+                        }
+                    } else {
+                        return; // Skip non-numeric cells for arithmetic
+                    }
+                }
+                
+                if (newVal !== currentVal) {
+                    console.log(`[UPDATE_ROW_VALUES] Updating Cell [${rowNumber}, ${cell.col}]: ${currentVal} -> ${newVal}`);
+                    cell.value = newVal;
+                }
+            };
+
+            if (targetColIndex !== -1) {
+                // Update specific column
+                const targetCell = row.getCell(targetColIndex);
+                updateCell(targetCell);
+            } else {
+                // Update ALL cells in the row (ONLY for arithmetic)
+                // We deliberately exclude SET here to prevent accidental row wipes
+                row.eachCell((cell, colNum) => {
+                    if (colNum !== searchColIndex) {
+                        updateCell(cell);
+                    }
+                });
+            }
+            rowsUpdated++;
+        }
+    });
+    
+    if (rowsUpdated === 0) {
+        throw new Error(`No rows updated. Filter value "${filterValue}" not found in column "${filterColumn}".`);
+    }
+
+    console.log(`[UPDATE_ROW_VALUES] Finished. Rows updated: ${rowsUpdated}`);
+};
+
+export const processExcelAction = async (filePath, actionData) => {
+  console.log('[processExcelAction] Loading workbook:', filePath);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.readFile(filePath);
+  
+  // 2. Verify Worksheet Resolution
+  const worksheet = workbook.worksheets[0]; 
+  if (!worksheet) {
+      throw new Error("Worksheet not found in the workbook.");
+  }
+  console.log(`[processExcelAction] Using sheet: ${worksheet.name}`);
+
+  const { action, params } = actionData;
+
+  switch (action) {
+    case 'ADD_COLUMN':
+      await addColumn(worksheet, params);
+      break;
+    case 'HIGHLIGHT_ROWS':
+      await highlightRows(worksheet, params);
+      break;
+    case 'SORT_DATA':
+      await sortData(worksheet, params);
+      break;
+    case 'ADD_VALUE_TO_ROW': // Legacy support
+    case 'UPDATE_ROW_VALUES':
+      await updateRowValues(worksheet, params);
+      break;
+    case 'UPDATE_KEY_VALUE':
+      await updateKeyValue(worksheet, params);
+      break;
+    case 'SET_CELL':
+      await setCell(worksheet, params);
+      break;
+    case 'FIND_AND_REPLACE':
+      await findAndReplace(worksheet, params);
+      break;
+    default:
+      console.warn(`Unsupported action: ${action}`);
+      throw new Error(`Unsupported action: ${action}`);
+  }
+
+  const parsed = path.parse(filePath);
+  const newFilePath = path.join(parsed.dir, `${parsed.name}_${Date.now()}${parsed.ext}`);
+
+  // 4. Save Workbook (Critical)
+  await workbook.xlsx.writeFile(newFilePath);
+  
+  // 5. Confirm Persistence
+  console.log("Workbook saved successfully");
+  console.log(`[processExcelAction] Saved to: ${newFilePath}`);
+  
+  return newFilePath;
+};
+
+
 
 /**
  * Get windowed/sliced data from an Excel sheet
