@@ -7,6 +7,22 @@ export const getPreviewData = async (filePath) => {
     
     const sheets = [];
 
+    const normalizeCellValue = (v) => {
+        if (v === null || v === undefined) return null;
+        if (v instanceof Date) return v.toISOString();
+        if (typeof v === 'object') {
+            if (typeof v.text === 'string') return v.text;
+            if (v.result !== undefined && v.result !== null) return v.result;
+            if (typeof v.formula === 'string') return `=${v.formula}`;
+            try {
+                return JSON.stringify(v);
+            } catch {
+                return String(v);
+            }
+        }
+        return v;
+    };
+
     workbook.eachSheet((worksheet, sheetId) => {
         const sheetData = [];
         // Ensure we capture all rows, even if they are empty, up to the last used row
@@ -31,6 +47,9 @@ export const getPreviewData = async (filePath) => {
              // Note: rowValues might be shorter than the max column count.
              // We should ideally pad it to the max column count of the sheet, but the frontend handles varying lengths.
              if (Array.isArray(rowValues)) {
+                 for (let j = 0; j < rowValues.length; j++) {
+                     rowValues[j] = normalizeCellValue(rowValues[j]);
+                 }
                  for(let j=0; j<rowValues.length; j++) {
                      if(rowValues[j] === undefined) rowValues[j] = null;
                  }
@@ -214,6 +233,59 @@ const sortData = async (worksheet, { column, order }) => {
     });
     
     console.log(`[SORT_DATA] Sorted ${rows.length} rows.`);
+};
+
+const updateColumnValues = async (worksheet, { column, operation, value }) => {
+    console.log(`[UPDATE_COLUMN_VALUES] Started. Column: ${column}, Op: ${operation}, Val: ${value}`);
+
+    const { colIndex, foundAtRow } = getColumnIndex(worksheet, column);
+    if (colIndex === -1) {
+        throw new Error(`Column "${column}" not found.`);
+    }
+
+    const headerRowIndex = foundAtRow === -1 ? 1 : foundAtRow;
+    const allowed = new Set(['SET', '+', '-', '*', '/']);
+    if (!allowed.has(operation)) {
+        throw new Error(`Invalid operation "${operation}". Allowed: SET, +, -, *, /.`);
+    }
+
+    let rowsUpdated = 0;
+
+    worksheet.eachRow((row, rowNumber) => {
+        if (rowNumber === headerRowIndex) return;
+
+        const cell = row.getCell(colIndex);
+        const currentVal = cell.value;
+
+        if (operation === 'SET') {
+            cell.value = value;
+            rowsUpdated++;
+            return;
+        }
+
+        const numCurrent = parseFloat(currentVal);
+        const numValue = parseFloat(value);
+        if (isNaN(numCurrent) || isNaN(numValue)) return;
+
+        let newVal = numCurrent;
+        switch (operation) {
+            case '+': newVal = numCurrent + numValue; break;
+            case '-': newVal = numCurrent - numValue; break;
+            case '*': newVal = numCurrent * numValue; break;
+            case '/': if (numValue !== 0) newVal = numCurrent / numValue; break;
+        }
+
+        if (newVal !== currentVal) {
+            cell.value = newVal;
+        }
+        rowsUpdated++;
+    });
+
+    if (rowsUpdated === 0) {
+        throw new Error(`No rows updated in column "${column}".`);
+    }
+
+    console.log(`[UPDATE_COLUMN_VALUES] Finished. Rows updated: ${rowsUpdated}`);
 };
 
 const updateKeyValue = async (worksheet, { keyColumn, keyValue, valueColumn, newValue }) => {
@@ -433,15 +505,16 @@ const updateRowValues = async (worksheet, { filterColumn, filterValue, operation
     console.log(`[UPDATE_ROW_VALUES] Finished. Rows updated: ${rowsUpdated}`);
 };
 
-export const processExcelAction = async (filePath, actionData) => {
+export const processExcelAction = async (filePath, actionData, sheetId) => {
   console.log('[processExcelAction] Loading workbook:', filePath);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.readFile(filePath);
   
   // 2. Verify Worksheet Resolution
-  const worksheet = workbook.worksheets[0]; 
+  const worksheet = sheetId ? workbook.getWorksheet(sheetId) : workbook.worksheets[0];
   if (!worksheet) {
-      throw new Error("Worksheet not found in the workbook.");
+      const available = workbook.worksheets.map(ws => ws.name).join(', ');
+      throw new Error(sheetId ? `Sheet "${sheetId}" not found in workbook. Available sheets: ${available}` : "Worksheet not found in the workbook.");
   }
   console.log(`[processExcelAction] Using sheet: ${worksheet.name}`);
 
@@ -456,6 +529,9 @@ export const processExcelAction = async (filePath, actionData) => {
       break;
     case 'SORT_DATA':
       await sortData(worksheet, params);
+      break;
+    case 'UPDATE_COLUMN_VALUES':
+      await updateColumnValues(worksheet, params);
       break;
     case 'ADD_VALUE_TO_ROW': // Legacy support
     case 'UPDATE_ROW_VALUES':
@@ -679,9 +755,11 @@ export const getWindowedSheetData = async (filePath, sheetId, rowStart, rowEnd, 
                 // For complex objects (formulas, rich text), extract the text representation
                 if (cellValue.text) {
                     cellValue = cellValue.text;
-                } else if (cellValue.result !== undefined) {
+                } else if (cellValue.result !== undefined && cellValue.result !== null) {
                     // Formula result
                     cellValue = cellValue.result;
+                } else if (typeof cellValue.formula === 'string') {
+                    cellValue = `=${cellValue.formula}`;
                 } else {
                     // Fallback: stringify complex objects
                     cellValue = JSON.stringify(cellValue);

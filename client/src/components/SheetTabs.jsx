@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 
 /**
  * SheetTabs - Excel-style sheet tabs component
@@ -18,11 +18,11 @@ const SheetTabs = ({ sheets = [], activeSheetId = 0, onSheetChange }) => {
   return (
     <div className="flex items-end bg-slate-100 dark:bg-slate-800 border-t border-slate-300 dark:border-slate-700 overflow-x-auto">
       <div className="flex items-end min-w-full">
-        {sheets.map((sheet, index) => {
+        {sheets.map((sheet) => {
           const isActive = sheet.sheetId === activeSheetId;
           
           return (
-            <motion.button
+            <Motion.button
               key={sheet.sheetId}
               onClick={() => onSheetChange(sheet.sheetId)}
               className={`
@@ -38,7 +38,7 @@ const SheetTabs = ({ sheets = [], activeSheetId = 0, onSheetChange }) => {
               whileTap={{ scale: 0.98 }}
             >
               {sheet.name}
-            </motion.button>
+            </Motion.button>
           );
         })}
         

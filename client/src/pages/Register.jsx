@@ -3,7 +3,7 @@ import { useAuth } from '../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
 import Input from '../components/ui/Input';
 import Button from '../components/ui/Button';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 
 const Register = () => {
   const [username, setUsername] = useState('');
@@ -30,7 +30,7 @@ const Register = () => {
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
-      <motion.div 
+      <Motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md bg-slate-800/50 p-8 rounded-2xl border border-slate-700 backdrop-blur-sm"
@@ -77,7 +77,7 @@ const Register = () => {
             Sign in
           </Link>
         </p>
-      </motion.div>
+      </Motion.div>
     </div>
   );
 };

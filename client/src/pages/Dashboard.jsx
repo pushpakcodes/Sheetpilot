@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { uploadFile, processCommand, getFiles, getWorkbookMetadata, downloadWorkbook } from '../services/api';
+import React, { useState } from 'react';
+import { uploadFile, processCommand, getWorkbookMetadata, downloadWorkbook } from '../services/api';
 import Navbar from '../components/Navbar';
 import FileUploader from '../components/FileUploader';
 import ExcelPreview from '../components/ExcelPreview';
@@ -8,7 +8,7 @@ import Spreadsheet from '../components/Spreadsheet';
 import SheetTabs from '../components/SheetTabs';
 import Ribbon from '../components/Ribbon';
 import ChatSidebar from '../components/ChatSidebar';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion as Motion, AnimatePresence } from 'framer-motion';
 import { Download, History, FileText, RotateCcw } from 'lucide-react';
 import Button from '../components/ui/Button';
 
@@ -81,16 +81,57 @@ const Dashboard = () => {
     setFileHistory(prev => [...prev, { file: currentFile, preview: previewData }]);
 
     try {
-      const { data } = await processCommand(command, currentFile.filePath);
-      if (data.success) {
-        setCurrentFile(prev => ({ ...prev, filePath: data.filePath }));
-        setPreviewData(data.preview);
-        setChatHistory(prev => [...prev, { type: 'bot', content: `Done! ${data.action.action} executed successfully.` }]);
+      const { data } = await processCommand(command, currentFile.filePath, activeSheetId);
+      const nextFilePath = data?.filePath;
+      const nextPreview = data?.preview;
+
+      if (nextFilePath && nextPreview) {
+        setCurrentFile(prev => ({ ...prev, filePath: nextFilePath }));
+        setPreviewData(nextPreview);
+      } else {
+        setFileHistory(prev => prev.slice(0, -1));
       }
+
+      let message = '';
+      if (Array.isArray(data?.results) && data.results.length > 0) {
+        const successCount = data.results.filter(r => r.success).length;
+        const total = data.results.length;
+        const header = data.success ? `Done! Completed ${successCount}/${total} step(s).` : `Stopped after ${successCount}/${total} step(s).`;
+        const lines = data.results.map((r, i) => {
+          if (r.success) return `${i + 1}) ${r.action}: success`;
+          return `${i + 1}) ${r.action}: failed${r.message ? ` (${r.message})` : ''}`;
+        });
+        message = [header, ...lines].join('\n');
+      } else if (data?.success && data?.action?.action) {
+        message = `Done! ${data.action.action} executed successfully.`;
+      } else if (!data?.success && data?.action?.action) {
+        message = `Stopped: ${data.action.action} did not complete.`;
+      } else {
+        message = data?.success ? 'Done!' : 'I could not complete that command.';
+      }
+
+      setChatHistory(prev => [...prev, { type: 'bot', content: message }]);
     } catch (error) {
       console.error(error);
-      const errorMsg = error.response?.data?.message || error.message;
-      setChatHistory(prev => [...prev, { type: 'bot', content: `I encountered an error: ${errorMsg}` }]);
+      const resp = error.response?.data;
+      const errorMsg = resp?.message || error.message;
+      const type = resp?.type;
+      const prefix = type === 'VALIDATION_ERROR' ? 'Validation error' : 'I encountered an error';
+      const detailKey = resp?.details?.key;
+      const followUp =
+        type === 'VALIDATION_ERROR' && detailKey
+          ? (() => {
+              if (detailKey === 'filterValue') return 'Which exact value should I match (e.g. Name = "Raj")?';
+              if (detailKey === 'filterColumn') return 'Which column should I match against?';
+              if (detailKey === 'targetColumn') return 'Which column should I update?';
+              if (detailKey === 'operation') return 'Should I SET, add (+), subtract (-), multiply (*), or divide (/)?';
+              return 'Can you rephrase with concrete column names and values?';
+            })()
+          : type === 'AI_ERROR'
+            ? 'Can you rephrase with the exact sheet, column names, and values?'
+            : '';
+      const content = followUp ? `${prefix}: ${errorMsg}\n${followUp}` : `${prefix}: ${errorMsg}`;
+      setChatHistory(prev => [...prev, { type: 'bot', content }]);
       // Revert undo stack if failed
       setFileHistory(prev => prev.slice(0, -1));
     } finally {
@@ -147,7 +188,7 @@ const Dashboard = () => {
           <main className="flex-1 flex flex-col relative overflow-hidden bg-white dark:bg-slate-900">
             <AnimatePresence mode="wait">
               {!currentFile ? (
-                <motion.div
+                <Motion.div
                   key="upload"
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
@@ -163,7 +204,7 @@ const Dashboard = () => {
                     </p>
                     <FileUploader onUpload={handleUpload} />
                   </div>
-                </motion.div>
+                </Motion.div>
               ) : (
                  // Use Handsontable Spreadsheet for Excel-like experience
                  currentFile?.filePath ? (

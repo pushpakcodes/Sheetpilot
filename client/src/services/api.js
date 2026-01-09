@@ -20,7 +20,7 @@ export const register = (username, email, password) => api.post('/auth/register'
 export const uploadFile = (formData) => api.post('/excel/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
 });
-export const processCommand = (command, filePath) => api.post('/excel/process', { command, filePath });
+export const processCommand = (command, filePath, sheetId) => api.post('/excel/process', { command, filePath, sheetId });
 export const getFiles = () => api.get('/excel/files');
 
 /**

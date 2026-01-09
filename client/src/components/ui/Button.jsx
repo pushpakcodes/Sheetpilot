@@ -1,6 +1,6 @@
 import React from 'react';
 import { cn } from '../../utils';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 
 const Button = ({ className, variant = 'primary', size = 'md', children, isLoading, ...props }) => {
   const variants = {
@@ -17,7 +17,7 @@ const Button = ({ className, variant = 'primary', size = 'md', children, isLoadi
   };
 
   return (
-    <motion.button
+    <Motion.button
       whileTap={{ scale: 0.98 }}
       className={cn(
         'inline-flex items-center justify-center rounded-lg font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed',
@@ -35,7 +35,7 @@ const Button = ({ className, variant = 'primary', size = 'md', children, isLoadi
         </svg>
       ) : null}
       {children}
-    </motion.button>
+    </Motion.button>
   );
 };
 

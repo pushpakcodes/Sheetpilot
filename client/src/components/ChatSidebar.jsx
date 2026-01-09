@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Sparkles, Bot, User, Clock } from 'lucide-react';
-import Button from './ui/Button';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Send, Sparkles, Bot, User } from 'lucide-react';
+import { motion as Motion } from 'framer-motion';
 
 const ChatSidebar = ({ onCommand, loading, history = [], suggestions = [] }) => {
   const [input, setInput] = useState('');
@@ -41,7 +40,7 @@ const ChatSidebar = ({ onCommand, loading, history = [], suggestions = [] }) => 
         )}
 
         {history.map((msg, index) => (
-          <motion.div
+          <Motion.div
             key={index}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -62,7 +61,7 @@ const ChatSidebar = ({ onCommand, loading, history = [], suggestions = [] }) => 
                 </div>
               )}
             </div>
-          </motion.div>
+          </Motion.div>
         ))}
 
         {loading && (

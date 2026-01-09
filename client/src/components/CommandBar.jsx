@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Send, Sparkles } from 'lucide-react';
 import Button from './ui/Button';
-import { motion } from 'framer-motion';
 
 const CommandBar = ({ onCommand, loading }) => {
   const [command, setCommand] = useState('');

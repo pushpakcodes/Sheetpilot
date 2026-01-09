@@ -1,5 +1,5 @@
 import React from 'react';
-import { motion } from 'framer-motion';
+import { motion as Motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight, Table, Sparkles, Shield, Zap } from 'lucide-react';
 import Button from '../components/ui/Button';
@@ -35,7 +35,7 @@ const LandingPage = () => {
         <div className="absolute left-0 right-0 top-0 -z-10 m-auto h-[310px] w-[310px] rounded-full bg-blue-500 opacity-20 blur-[100px]"></div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
-          <motion.div
+          <Motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
@@ -63,10 +63,10 @@ const LandingPage = () => {
                 Try SheetPilot Free <ArrowRight className="ml-2 h-5 w-5" />
               </Button>
             </div>
-          </motion.div>
+          </Motion.div>
 
           {/* Visual Preview */}
-          <motion.div 
+          <Motion.div 
             initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2, duration: 0.8 }}
@@ -98,7 +98,7 @@ const LandingPage = () => {
                     <div className="bg-white dark:bg-slate-950/50 p-3 text-sm text-blue-600 dark:text-blue-400 font-mono border-t border-slate-100 dark:border-slate-800 relative">
                         ${(500 + rowIdx * 100).toLocaleString()}
                         {rowIdx === 2 && (
-                            <motion.div 
+                            <Motion.div 
                                 initial={{ width: 0 }}
                                 animate={{ width: '100%' }}
                                 className="absolute inset-0 bg-blue-500/20 border border-blue-500/50 z-10"
@@ -119,7 +119,7 @@ const LandingPage = () => {
                  </div>
               </div>
             </div>
-          </motion.div>
+          </Motion.div>
         </div>
       </section>
 
@@ -146,14 +146,14 @@ const LandingPage = () => {
 
       {/* Corner Button */}
       <div className="fixed bottom-8 right-8 z-50">
-          <motion.button 
+          <Motion.button 
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={() => navigate('/register')}
             className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-3 rounded-full shadow-lg shadow-blue-600/30 font-semibold flex items-center gap-2"
           >
             Try SheetPilot <ArrowRight className="h-4 w-4" />
-          </motion.button>
+          </Motion.button>
       </div>
 
       {/* Bottom Button */}

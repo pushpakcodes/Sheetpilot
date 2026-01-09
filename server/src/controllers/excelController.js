@@ -39,17 +39,22 @@ export const uploadExcel = async (req, res) => {
 };
 
 export const processCommand = async (req, res) => {
-    const { command, filePath } = req.body;
+    const { command, filePath, sheetId } = req.body;
     
     if (!command || !filePath) {
         return res.status(400).json({ message: 'Command and filePath are required' });
     }
 
     try {
-        const result = await executeAICommand(command, filePath);
+        const result = await executeAICommand(command, filePath, sheetId);
         res.json(result);
     } catch (error) {
-        res.status(500).json({ message: error.message });
+        const statusCode = error?.statusCode || 500;
+        res.status(statusCode).json({
+            message: error?.message || 'Command execution failed',
+            type: error?.type,
+            details: error?.details
+        });
     }
 };
 

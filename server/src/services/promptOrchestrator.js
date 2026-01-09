@@ -19,8 +19,10 @@ Rules:
 - Do NOT include explanations
 - Do NOT include markdown
 - Do NOT hallucinate columns or sheets
-- If the command is unclear, return an error object
-- If the user asks to modify existing values, never create a new column. Use ADD_VALUE_TO_ROW.
+- Never leave required params empty or missing
+- If the command is unclear or you are unsure, return an ERROR object instead of guessing
+- If the user asks to modify existing values, never create a new column unless they explicitly asked to add one
+- If a command requires multiple steps, output multiple actions using the multi-step schema below
 
 Supported Actions & Parameters:
 
@@ -42,16 +44,24 @@ Supported Actions & Parameters:
    - column: string (column name to sort by)
    - order: string ("asc" or "desc")
 
-4. UPDATE_ROW_VALUES
+4. UPDATE_COLUMN_VALUES
+   Updates an entire column using arithmetic or replacement.
+   USE THIS for commands like "multiply Percentage by 100" or "add 10 to Score".
+   Params:
+   - column: string (column name to update)
+   - operation: string ("SET", "+", "-", "*", "/")
+   - value: string/number (The new value or the amount to apply)
+
+5. UPDATE_ROW_VALUES
    Updates values in a row identified by a specific filter value. Supports both arithmetic and replacement.
    Params:
    - filterColumn: string (Column to search in, e.g., "Name", "ID", or "Key". If finding a key-value pair, this is the key name)
    - filterValue: string/number (The value to identify the row, e.g., "raj" or "Total")
    - operation: string ("SET", "+", "-", "*", "/")
    - value: string/number (The new value or the amount to add/subtract. For "SET", this is the new content. MUST be extracted from user input.)
-   - targetColumn: string (Optional. Specific column to update. If omitted, updates relevant data cells in the row)
+   - targetColumn: string (Required. Specific column to update)
 
-5. UPDATE_KEY_VALUE
+6. UPDATE_KEY_VALUE
    Updates values in a Key-Value table structure (where one column acts as a key and another as the value).
    USE THIS when the user wants to update a value associated with a specific label (e.g. "Change Name to Raj").
    Params:
@@ -60,13 +70,13 @@ Supported Actions & Parameters:
    - valueColumn: string (Optional. The header of the value column. If no header exists, OMIT this parameter.)
    - newValue: string/number (The new value to set)
 
-6. SET_CELL
+7. SET_CELL
    Updates a specific cell to a new value.
    Params:
    - cell: string (Cell address, e.g., "A1", "B5")
    - value: string/number (The new value)
 
-7. FIND_AND_REPLACE
+8. FIND_AND_REPLACE
    Finds a specific value in the sheet and replaces it with a new value.
    USE THIS for "Change X to Y" requests when X is a value (not a Key/Header).
    Params:
@@ -74,7 +84,7 @@ Supported Actions & Parameters:
    - replaceValue: string/number (The new value, e.g., "12333", "new_value")
    - column: string (Optional. Restrict search to this column name. If omitted, searches all columns.)
 
-8. ERROR
+9. ERROR
    Used when the command is invalid, unclear, or unsupported.
    Params:
    - message: string (reason for error)
@@ -87,6 +97,14 @@ Expected JSON Schema:
   }
 }
 
+Multi-step JSON Schema:
+{
+  "actions": [
+    { "action": "ACTION_NAME", "params": { } },
+    { "action": "ACTION_NAME", "params": { } }
+  ]
+}
+
 Examples:
 1. Input: "Add a Profit column which is Revenue minus Cost"
    Output: { "action": "ADD_COLUMN", "params": { "columnName": "Profit", "formula": "Revenue - Cost" } }
@@ -97,33 +115,36 @@ Examples:
 3. Input: "Sort by Date descending"
    Output: { "action": "SORT_DATA", "params": { "column": "Date", "order": "desc" } }
 
-4. Input: "Add +100 to all the entries of raj"
+4. Input: "Multiply Percentage by 100"
+   Output: { "action": "UPDATE_COLUMN_VALUES", "params": { "column": "Percentage", "operation": "*", "value": 100 } }
+
+5. Input: "Add +100 to all the entries of raj"
    Output: { "action": "UPDATE_ROW_VALUES", "params": { "filterColumn": "Name", "filterValue": "raj", "operation": "+", "value": 100 } }
 
-5. Input: "Change the name of user 101 to Michael"
+6. Input: "Change the name of user 101 to Michael"
    Output: { "action": "UPDATE_ROW_VALUES", "params": { "filterColumn": "ID", "filterValue": 101, "operation": "SET", "value": "Michael", "targetColumn": "Name" } }
 
-6. Input: "Update name to Raj" (Implies searching for "name" key in a Key-Value list)
+7. Input: "Update name to Raj" (Implies searching for "name" key in a Key-Value list)
    Output: { "action": "UPDATE_KEY_VALUE", "params": { "keyColumn": "name", "keyValue": "name", "newValue": "Raj" } }
 
-7. Input: "Change entc to 12333" (User wants to replace a specific value 'entc')
+8. Input: "Change entc to 12333" (User wants to replace a specific value 'entc')
    Output: { "action": "FIND_AND_REPLACE", "params": { "findValue": "entc", "replaceValue": "12333" } }
 
-8. Input: "Replace 'Pending' with 'Done' in Status column"
+9. Input: "Replace 'Pending' with 'Done' in Status column"
    Output: { "action": "FIND_AND_REPLACE", "params": { "findValue": "Pending", "replaceValue": "Done", "column": "Status" } }
 
-9. Input: "Change pushpak to Raj" (Where 'pushpak' is the current value for 'Name')
-   Output: { "action": "UPDATE_KEY_VALUE", "params": { "keyColumn": "Name", "keyValue": "Name", "newValue": "Raj" } }
+10. Input: "Change pushpak to Raj" (Where 'pushpak' is the current value for 'Name')
+    Output: { "action": "UPDATE_KEY_VALUE", "params": { "keyColumn": "Name", "keyValue": "Name", "newValue": "Raj" } }
 
-10. Input: "Set quantity for Item A to 50"
+11. Input: "Set quantity for Item A to 50"
     Output: { "action": "UPDATE_KEY_VALUE", "params": { "keyColumn": "Item", "keyValue": "Item A", "valueColumn": "Quantity", "newValue": 50 } }
 
-11. Input: "Set cell A1 to 'Hello World'"
+12. Input: "Set cell A1 to 'Hello World'"
     Output: { "action": "SET_CELL", "params": { "cell": "A1", "value": "Hello World" } }
 `;
 
 
-export const orchestratePrompt = async (userCommand) => {
+export const orchestratePrompt = async (userCommand, context = {}) => {
   if (!process.env.GROQ_API_KEY) {
     console.error("Missing GROQ_API_KEY in environment variables");
     return {
@@ -133,11 +154,19 @@ export const orchestratePrompt = async (userCommand) => {
   }
 
   try {
+    const contextLines = [];
+    if (context?.sheetName) contextLines.push(`Active sheet: ${context.sheetName}`);
+    if (Array.isArray(context?.columns) && context.columns.length > 0) {
+      contextLines.push(`Columns in this sheet: ${context.columns.join(', ')}`);
+      contextLines.push(`Only use column names from the provided list when a column is required.`);
+    }
+
     const response = await groq.chat.completions.create({
       model: MODEL,
       temperature: 0,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
+        ...(contextLines.length > 0 ? [{ role: "system", content: contextLines.join('\n') }] : []),
         { role: "user", content: userCommand },
       ],
     });

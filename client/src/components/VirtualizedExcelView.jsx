@@ -17,7 +17,7 @@ import { getSheetWindow } from '../services/api';
  * - Calculates which window to fetch based on scroll position
  * - Never loads the entire sheet into memory
  */
-const VirtualizedExcelView = ({ filePath, sheetId, onSheetChange }) => {
+const VirtualizedExcelView = ({ filePath, sheetId }) => {
   // Metadata about the sheet (total dimensions)
   const [metadata, setMetadata] = useState(null);
   
@@ -27,12 +27,6 @@ const VirtualizedExcelView = ({ filePath, sheetId, onSheetChange }) => {
   
   // Loading states for different windows
   const [loadingWindows, setLoadingWindows] = useState(new Set());
-  
-  // Grid dimensions (visible viewport)
-  const [gridDimensions, setGridDimensions] = useState({
-    rowCount: 100,  // Initial estimate, will be updated from metadata
-    columnCount: 30 // Initial estimate, will be updated from metadata
-  });
   
   // Scroll position tracking
   const gridRef = useRef(null);
@@ -100,10 +94,6 @@ const VirtualizedExcelView = ({ filePath, sheetId, onSheetChange }) => {
         const response = await getSheetWindow(workbookId, 1, 1, 1, 1, sheetId);
         const meta = response.data.meta;
         setMetadata(meta);
-        setGridDimensions({
-          rowCount: meta.totalRows || 1000,
-          columnCount: meta.totalColumns || 26
-        });
       } catch (error) {
         console.error('Error fetching metadata:', error);
       }
@@ -208,7 +198,7 @@ const VirtualizedExcelView = ({ filePath, sheetId, onSheetChange }) => {
     const excelCol = colIndex + 1;
     
     // Find which window contains this cell
-    for (const [cacheKey, windowData] of dataCache.entries()) {
+    for (const windowData of dataCache.values()) {
       const { rowStart, rowEnd, colStart, colEnd, data } = windowData;
       
       if (excelRow >= rowStart && excelRow <= rowEnd &&
@@ -248,7 +238,7 @@ const VirtualizedExcelView = ({ filePath, sheetId, onSheetChange }) => {
    * This is called by react-window for each visible cell
    * react-window 2.x passes: columnIndex, rowIndex, style, ariaAttributes
    */
-  const Cell = useCallback(({ columnIndex, rowIndex, style, ariaAttributes }) => {
+  const Cell = useCallback(({ columnIndex, rowIndex, style, ariaAttributes: _ariaAttributes }) => {
     // Row 0 and Column 0 are headers
     if (rowIndex === 0 && columnIndex === 0) {
       // Corner cell (select all)
@@ -337,7 +327,6 @@ const VirtualizedExcelView = ({ filePath, sheetId, onSheetChange }) => {
     
     const cellValue = getCellValue(gridRowIndex, gridColIndex);
     const excelRow = rowIndex; // Excel row number (1-based)
-    const excelCol = columnIndex; // Excel col number (1-based, but we display as 0-based in grid)
     
     const isLoading = cellValue === null && 
       loadingWindows.size > 0 && 
