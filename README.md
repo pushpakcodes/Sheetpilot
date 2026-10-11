@@ -65,9 +65,4 @@ SheetPilot is a full-stack AI-powered web application that allows users to perfo
 4.  Wait for AI to process and view the updated preview.
 5.  Download the modified file.
 
-## AI Commands Supported
-
-- Add new columns with formulas
-- Highlight rows based on conditions
-- Sort data
-- (More to come)
+## (Note : This is Old Version , New Improved Version's Repo is Private )
